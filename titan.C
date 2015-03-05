@@ -97,32 +97,16 @@ int main(int argc, char** argv) {
 	LinearImplicitSystem& system = es.add_system<LinearImplicitSystem>("SW");
 
 //	first we just create height
-	unsigned int h_var = es.get_system("SW").add_variable("h", FIRST);
+//	unsigned int h_var = es.get_system("SW").add_variable("h", SECOND);
+	es.get_system("SW").add_variable("h", SECOND);
 //		first momentum
-	es.get_system("SW").add_variable("p", FIRST);
+	es.get_system("SW").add_variable("p", SECOND);
 //		second momentum
 	es.get_system("SW").add_variable("q", FIRST);
 
 	es.get_system("SW").attach_assemble_function(assemble_sw);
 
-	std::set<boundary_id_type> boundary_ids;
-
-	boundary_ids.insert(0);
-	boundary_ids.insert(1);
-	boundary_ids.insert(2);
-	boundary_ids.insert(3);
-
-	std::vector<unsigned int> variables(1);
-	variables[0] = h_var;
-
-	AnalyticFunction<> exact_solution_object(exact_solution_wrapper);
-
-	DirichletBoundary dirichlet_bc(boundary_ids, variables,
-			&exact_solution_object);
-
-	system.get_dof_map().add_dirichlet_boundary(dirichlet_bc);
-
-	// initialize es
+// initialize es
 	es.init();
 
 	mesh.print_info();
@@ -388,7 +372,8 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 //					 The XYZ locations (in physical space) of the
 //					 quadrature points on the face.  This is where
 //					 we will interpolate the boundary value function.
-//
+					const std::vector<Point>& qface_point = fe_face->get_xyz();
+
 //					 Compute the shape function values on the element
 //					 face.
 					fe_face->reinit(elem, side);
@@ -396,12 +381,15 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 					// Loop over the face quadrature points for integration.
 					for (unsigned int qp = 0; qp < qface.n_points(); qp++) {
 
-						// The penalty value.  \frac{1}{\epsilon}
-						// in the discussion above.
+						// The location on the boundary of the current
+						// face quadrature point.
+						const Real xf = qface_point[qp](0);
+						const Real yf = qface_point[qp](1);
+
 						const Real penalty = 1.e10;
 
 						// The boundary value.
-						const Real value = 1;
+						const Real value = exact_solution(xf, yf);
 
 						// Matrix contribution of the L2 projection.
 						for (unsigned int i = 0; i < phi_face.size(); i++)
@@ -409,8 +397,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 								Ke(i, j) += JxW_face[qp] * penalty
 										* phi_face[i][qp] * phi_face[j][qp];
 
-						// Right-hand-side contribution of the L2
-						// projection.
+						// Right-hand-side contribution of the L2 projection.
 						for (unsigned int i = 0; i < phi_face.size(); i++)
 							Fe(i) += JxW_face[qp] * penalty * value
 									* phi_face[i][qp];
@@ -430,8 +417,11 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 //		we would have to apply any hanging node constraint equations
 //		Also, note that here we call heterogenously_constrain_element_matrix_and_vector
 //		to impose a inhomogeneous Dirichlet boundary conditions.
-		dof_map.heterogenously_constrain_element_matrix_and_vector(Ke, Fe,
-				dof_indices);
+//		dof_map.heterogenously_constrain_element_matrix_and_vector(Ke, Fe,
+//				dof_indices);
+
+//		based on intro example3.C
+		dof_map.constrain_element_matrix_and_vector (Ke, Fe, dof_indices);
 
 //		The element matrix and right-hand-side are now built
 //		for this element.  Add them to the global matrix and
