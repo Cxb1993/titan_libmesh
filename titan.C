@@ -98,11 +98,11 @@ int main(int argc, char** argv) {
 
 //	first we just create height
 //	unsigned int h_var = es.get_system("SW").add_variable("h", SECOND);
-	es.get_system("SW").add_variable("u", SECOND);
+	es.get_system("SW").add_variable("h", SECOND);
 //		first momentum
-	es.get_system("SW").add_variable("v", SECOND);
+	es.get_system("SW").add_variable("mx", SECOND);
 //		second momentum
-	es.get_system("SW").add_variable("p", FIRST);
+	es.get_system("SW").add_variable("my", FIRST);
 
 	es.get_system("SW").attach_assemble_function(assemble_sw);
 
@@ -141,46 +141,46 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	LinearImplicitSystem & system = es.get_system<LinearImplicitSystem>("SW");
 
 	// Numeric ids corresponding to each variable in the system
-	const unsigned int u_var = system.variable_number("u");
-	const unsigned int v_var = system.variable_number("v");
-	const unsigned int p_var = system.variable_number("p");
+	const unsigned int h_var = system.variable_number("h");
+	const unsigned int mx_var = system.variable_number("mx");
+	const unsigned int my_var = system.variable_number("my");
 
 	// Get the Finite Element type for "u".  Note this will be
 	// the same as the type for "v".
-	FEType fe_vel_type = system.variable_type(u_var);
+	FEType fe_h_type = system.variable_type(h_var);
 
 	// Get the Finite Element type for "p".
-	FEType fe_pres_type = system.variable_type(p_var);
+	FEType fe_my_type = system.variable_type(my_var);
 
 	// Build a Finite Element object of the specified type for
 	// the velocity variables.
-	AutoPtr<FEBase> fe_vel(FEBase::build(dim, fe_vel_type));
+	AutoPtr<FEBase> fe_h(FEBase::build(dim, fe_h_type));
 
 	// Build a Finite Element object of the specified type for
 	// the pressure variables.
-	AutoPtr<FEBase> fe_pres(FEBase::build(dim, fe_pres_type));
+	AutoPtr<FEBase> fe_my(FEBase::build(dim, fe_my_type));
 
 	// A Gauss quadrature rule for numerical integration.
 	// Let the \p FEType object decide what order rule is appropriate.
-	QGauss qrule(dim, fe_vel_type.default_quadrature_order());
+	QGauss qrule(dim, fe_h_type.default_quadrature_order());
 
 	// Tell the finite element objects to use our quadrature rule.
-	fe_vel->attach_quadrature_rule(&qrule);
-	fe_pres->attach_quadrature_rule(&qrule);
+	fe_h->attach_quadrature_rule(&qrule);
+	fe_my->attach_quadrature_rule(&qrule);
 
 	// Here we define some references to cell-specific data that
 	// will be used to assemble the linear system.
 	//
 	// The element Jacobian * quadrature weight at each integration point.
-	const std::vector<Real>& JxW = fe_vel->get_JxW();
+	const std::vector<Real>& JxW = fe_h->get_JxW();
 
 	// The element shape function gradients for the velocity
 	// variables evaluated at the quadrature points.
-	const std::vector<std::vector<RealGradient> >& dphi = fe_vel->get_dphi();
+	const std::vector<std::vector<RealGradient> >& dphi = fe_h->get_dphi();
 
 	// The element shape functions for the pressure variable
 	// evaluated at the quadrature points.
-	const std::vector<std::vector<Real> >& psi = fe_pres->get_phi();
+	const std::vector<std::vector<Real> >& psi = fe_my->get_phi();
 
 	// A reference to the \p DofMap object for this system.  The \p DofMap
 	// object handles the index translation from node and element numbers
@@ -195,18 +195,18 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	DenseMatrix<Number> Ke;
 	DenseVector<Number> Fe;
 
-	DenseSubMatrix<Number> Kuu(Ke), Kuv(Ke), Kup(Ke), Kvu(Ke), Kvv(Ke), Kvp(Ke),
-			Kpu(Ke), Kpv(Ke), Kpp(Ke);
+	DenseSubMatrix<Number> Khh(Ke), Khmx(Ke), Khmy(Ke), Kmxh(Ke), Kmxmx(Ke),
+			Kmxmy(Ke), Kmyh(Ke), Kmymx(Ke), Kmymy(Ke);
 
-	DenseSubVector<Number> Fu(Fe), Fv(Fe), Fp(Fe);
+	DenseSubVector<Number> Fh(Fe), Fmx(Fe), Fmy(Fe);
 
 	// This vector will hold the degree of freedom indices for
 	// the element.  These define where in the global system
 	// the element degrees of freedom get mapped.
-	std::vector<dof_id_type> dof_indices;
-	std::vector<dof_id_type> dof_indices_u;
-	std::vector<dof_id_type> dof_indices_v;
-	std::vector<dof_id_type> dof_indices_p;
+	std::vector<dof_id_type> dof_ind;
+	std::vector<dof_id_type> dof_ind_h;
+	std::vector<dof_id_type> dof_ind_mx;
+	std::vector<dof_id_type> dof_ind_my;
 
 	// Now we will loop over all the elements in the mesh that
 	// live on the local processor. We will compute the element
@@ -229,22 +229,22 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// current element.  These define where in the global
 		// matrix and right-hand-side this element will
 		// contribute to.
-		dof_map.dof_indices(elem, dof_indices);
-		dof_map.dof_indices(elem, dof_indices_u, u_var);
-		dof_map.dof_indices(elem, dof_indices_v, v_var);
-		dof_map.dof_indices(elem, dof_indices_p, p_var);
+		dof_map.dof_indices(elem, dof_ind);
+		dof_map.dof_indices(elem, dof_ind_h, h_var);
+		dof_map.dof_indices(elem, dof_ind_mx, mx_var);
+		dof_map.dof_indices(elem, dof_ind_my, my_var);
 
-		const unsigned int n_dofs = dof_indices.size();
-		const unsigned int n_u_dofs = dof_indices_u.size();
-		const unsigned int n_v_dofs = dof_indices_v.size();
-		const unsigned int n_p_dofs = dof_indices_p.size();
+		const unsigned int n_dofs = dof_ind.size();
+		const unsigned int n_h_dofs = dof_ind_h.size();
+		const unsigned int n_mx_dofs = dof_ind_mx.size();
+		const unsigned int n_my_dofs = dof_ind_my.size();
 
 		// Compute the element-specific data for the current
 		// element.  This involves computing the location of the
 		// quadrature points (q_point) and the shape functions
 		// (phi, dphi) for the current element.
-		fe_vel->reinit(elem);
-		fe_pres->reinit(elem);
+		fe_h->reinit(elem);
+		fe_my->reinit(elem);
 
 		// Zero the element matrix and right-hand side before
 		// summing them.  We use the resize member here because
@@ -258,9 +258,9 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// Reposition the submatrices...  The idea is this:
 		//
 		//         -           -          -  -
-		//        | Kuu Kuv Kup |        | Fu |
-		//   Ke = | Kvu Kvv Kvp |;  Fe = | Fv |
-		//        | Kpu Kpv Kpp |        | Fp |
+		//        | Khh  Khmx  Khmy  |        | Fh |
+		//   Ke = | Kmxh Kmxmx Kmxmy |;  Fe = | Fmx |
+		//        | Kmyh Kmymx Kmymy |        | Fmy |
 		//         -           -          -  -
 		//
 		// The \p DenseSubMatrix.repostition () member takes the
@@ -268,21 +268,29 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		//
 		// Similarly, the \p DenseSubVector.reposition () member
 		// takes the (row_offset, row_size)
-		Kuu.reposition(u_var * n_u_dofs, u_var * n_u_dofs, n_u_dofs, n_u_dofs);
-		Kuv.reposition(u_var * n_u_dofs, v_var * n_u_dofs, n_u_dofs, n_v_dofs);
-		Kup.reposition(u_var * n_u_dofs, p_var * n_u_dofs, n_u_dofs, n_p_dofs);
+		Khh.reposition(h_var * n_h_dofs, h_var * n_h_dofs, n_h_dofs, n_h_dofs);
+		Khmx.reposition(h_var * n_h_dofs, mx_var * n_h_dofs, n_h_dofs,
+				n_mx_dofs);
+		Khmy.reposition(h_var * n_h_dofs, my_var * n_h_dofs, n_h_dofs,
+				n_my_dofs);
 
-		Kvu.reposition(v_var * n_v_dofs, u_var * n_v_dofs, n_v_dofs, n_u_dofs);
-		Kvv.reposition(v_var * n_v_dofs, v_var * n_v_dofs, n_v_dofs, n_v_dofs);
-		Kvp.reposition(v_var * n_v_dofs, p_var * n_v_dofs, n_v_dofs, n_p_dofs);
+		Kmxh.reposition(mx_var * n_mx_dofs, h_var * n_mx_dofs, n_mx_dofs,
+				n_h_dofs);
+		Kmxmx.reposition(mx_var * n_mx_dofs, mx_var * n_mx_dofs, n_mx_dofs,
+				n_mx_dofs);
+		Kmxmy.reposition(mx_var * n_mx_dofs, my_var * n_mx_dofs, n_mx_dofs,
+				n_my_dofs);
 
-		Kpu.reposition(p_var * n_u_dofs, u_var * n_u_dofs, n_p_dofs, n_u_dofs);
-		Kpv.reposition(p_var * n_u_dofs, v_var * n_u_dofs, n_p_dofs, n_v_dofs);
-		Kpp.reposition(p_var * n_u_dofs, p_var * n_u_dofs, n_p_dofs, n_p_dofs);
+		Kmyh.reposition(my_var * n_h_dofs, h_var * n_h_dofs, n_my_dofs,
+				n_h_dofs);
+		Kmymx.reposition(my_var * n_h_dofs, mx_var * n_h_dofs, n_my_dofs,
+				n_mx_dofs);
+		Kmymy.reposition(my_var * n_h_dofs, my_var * n_h_dofs, n_my_dofs,
+				n_my_dofs);
 
-		Fu.reposition(u_var * n_u_dofs, n_u_dofs);
-		Fv.reposition(v_var * n_u_dofs, n_v_dofs);
-		Fp.reposition(p_var * n_u_dofs, n_p_dofs);
+		Fh.reposition(h_var * n_h_dofs, n_h_dofs);
+		Fmx.reposition(mx_var * n_h_dofs, n_mx_dofs);
+		Fmy.reposition(my_var * n_h_dofs, n_my_dofs);
 
 		perf_log.pop("elem_init");
 
@@ -290,36 +298,36 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		for (unsigned int qp = 0; qp < qrule.n_points(); qp++) {
 			// Assemble the u-velocity row
 			// uu coupling
-			for (unsigned int i = 0; i < n_u_dofs; i++)
-				for (unsigned int j = 0; j < n_u_dofs; j++)
-					Kuu(i, j) += JxW[qp] * (dphi[i][qp] * dphi[j][qp]);
+			for (unsigned int i = 0; i < n_h_dofs; i++)
+				for (unsigned int j = 0; j < n_h_dofs; j++)
+					Khh(i, j) += JxW[qp] * (dphi[i][qp] * dphi[j][qp]);
 
 			// up coupling
-			for (unsigned int i = 0; i < n_u_dofs; i++)
-				for (unsigned int j = 0; j < n_p_dofs; j++)
-					Kup(i, j) += -JxW[qp] * psi[j][qp] * dphi[i][qp](0);
+			for (unsigned int i = 0; i < n_h_dofs; i++)
+				for (unsigned int j = 0; j < n_my_dofs; j++)
+					Khmy(i, j) += -JxW[qp] * psi[j][qp] * dphi[i][qp](0);
 
 			// Assemble the v-velocity row
 			// vv coupling
-			for (unsigned int i = 0; i < n_v_dofs; i++)
-				for (unsigned int j = 0; j < n_v_dofs; j++)
-					Kvv(i, j) += JxW[qp] * (dphi[i][qp] * dphi[j][qp]);
+			for (unsigned int i = 0; i < n_mx_dofs; i++)
+				for (unsigned int j = 0; j < n_mx_dofs; j++)
+					Kmxmx(i, j) += JxW[qp] * (dphi[i][qp] * dphi[j][qp]);
 
 			// vp coupling
-			for (unsigned int i = 0; i < n_v_dofs; i++)
-				for (unsigned int j = 0; j < n_p_dofs; j++)
-					Kvp(i, j) += -JxW[qp] * psi[j][qp] * dphi[i][qp](1);
+			for (unsigned int i = 0; i < n_mx_dofs; i++)
+				for (unsigned int j = 0; j < n_my_dofs; j++)
+					Kmxmy(i, j) += -JxW[qp] * psi[j][qp] * dphi[i][qp](1);
 
 			// Assemble the pressure row
 			// pu coupling
-			for (unsigned int i = 0; i < n_p_dofs; i++)
-				for (unsigned int j = 0; j < n_u_dofs; j++)
-					Kpu(i, j) += -JxW[qp] * psi[i][qp] * dphi[j][qp](0);
+			for (unsigned int i = 0; i < n_my_dofs; i++)
+				for (unsigned int j = 0; j < n_h_dofs; j++)
+					Kmyh(i, j) += -JxW[qp] * psi[i][qp] * dphi[j][qp](0);
 
 			// pv coupling
-			for (unsigned int i = 0; i < n_p_dofs; i++)
-				for (unsigned int j = 0; j < n_v_dofs; j++)
-					Kpv(i, j) += -JxW[qp] * psi[i][qp] * dphi[j][qp](1);
+			for (unsigned int i = 0; i < n_my_dofs; i++)
+				for (unsigned int j = 0; j < n_mx_dofs; j++)
+					Kmymx(i, j) += -JxW[qp] * psi[i][qp] * dphi[j][qp](1);
 
 		} // end of the quadrature point qp-loop
 
@@ -364,12 +372,12 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 						for (unsigned int n = 0; n < elem->n_nodes(); n++)
 							if (elem->node(n) == side->node(ns)) {
 								// Matrix contribution.
-								Kuu(n, n) += penalty;
-								Kvv(n, n) += penalty;
+								Khh(n, n) += penalty;
+								Kmxmx(n, n) += penalty;
 
 								// Right-hand-side contribution.
-								Fu(n) += penalty * u_value;
-								Fv(n) += penalty * v_value;
+								Fh(n) += penalty * u_value;
+								Fmx(n) += penalty * v_value;
 							}
 					} // end face node loop
 				} // end if (elem->neighbor(side) == NULL)
@@ -377,14 +385,14 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 
 		// If this assembly program were to be used on an adaptive mesh,
 		// we would have to apply any hanging node constraint equations.
-		dof_map.constrain_element_matrix_and_vector(Ke, Fe, dof_indices);
+		dof_map.constrain_element_matrix_and_vector(Ke, Fe, dof_ind);
 
 		// The element matrix and right-hand-side are now built
 		// for this element.  Add them to the global matrix and
 		// right-hand-side vector.  The \p NumericMatrix::add_matrix()
 		// and \p NumericVector::add_vector() members do this for us.
-		system.matrix->add_matrix(Ke, dof_indices);
-		system.rhs->add_vector(Fe, dof_indices);
+		system.matrix->add_matrix(Ke, dof_ind);
+		system.rhs->add_vector(Fe, dof_ind);
 	} // end of element loop
 
 	// That's it.
