@@ -10,7 +10,6 @@
 // can be solved in parallel.  This example introduces the concept of the
 // inner nonlinear loop for each timestep, and requires a good deal of
 // linear algebra number-crunching at each step.
-
 // C++ include files that we need
 #include <iostream>
 #include <math.h>
@@ -68,6 +67,21 @@ using namespace libMesh;
 
 void assemble_sw(EquationSystems& es, const std::string& system_name);
 
+void init_cd(EquationSystems& es, const std::string& system_name);
+
+Real exact_solution(const Real x, const Real y){
+
+	Real h=0.;
+	if (x*x+y*y<=.1)
+		h = 1;
+	return h;
+}
+
+Number exact_value(const Point& p, const Parameters& parameters,
+		const std::string&, const std::string&) {
+	return exact_solution(p(0), p(1));
+}
+
 int main(int argc, char** argv) {
 
 	LibMeshInit init(argc, argv);
@@ -100,13 +114,14 @@ int main(int argc, char** argv) {
 
 //	first we just create height
 //	unsigned int h_var = es.get_system("SW").add_variable("h", SECOND);
-	es.get_system("SW").add_variable("h", SECOND);
+	es.get_system("SW").add_variable("h", FIRST);
 //		first momentum
-	es.get_system("SW").add_variable("mx", SECOND);
+	es.get_system("SW").add_variable("p", FIRST);
 //		second momentum
-	es.get_system("SW").add_variable("my", FIRST);
+	es.get_system("SW").add_variable("q", FIRST);
 
 	es.get_system("SW").attach_assemble_function(assemble_sw);
+	es.get_system("SW").attach_init_function(init_cd);
 
 // initialize es
 	es.init();
@@ -214,23 +229,16 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 
 	// Numeric ids corresponding to each variable in the system
 	const unsigned int h_var = system.variable_number("h");
-	const unsigned int mx_var = system.variable_number("mx");
-	const unsigned int my_var = system.variable_number("my");
+	const unsigned int p_var = system.variable_number("p");
+	const unsigned int q_var = system.variable_number("q");
 
 	// Get the Finite Element type for "u".  Note this will be
 	// the same as the type for "v".
 	FEType fe_h_type = system.variable_type(h_var);
 
-	// Get the Finite Element type for "p".
-	FEType fe_my_type = system.variable_type(my_var);
-
 	// Build a Finite Element object of the specified type for
 	// the velocity variables.
 	AutoPtr<FEBase> fe_h(FEBase::build(dim, fe_h_type));
-
-	// Build a Finite Element object of the specified type for
-	// the pressure variables.
-	AutoPtr<FEBase> fe_my(FEBase::build(dim, fe_my_type));
 
 	// A Gauss quadrature rule for numerical integration.
 	// Let the \p FEType object decide what order rule is appropriate.
@@ -238,7 +246,6 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 
 	// Tell the finite element objects to use our quadrature rule.
 	fe_h->attach_quadrature_rule(&qrule);
-	fe_my->attach_quadrature_rule(&qrule);
 
 	// Here we define some references to cell-specific data that
 	// will be used to assemble the linear system.
@@ -253,10 +260,6 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// variables evaluated at the quadrature points.
 	const std::vector<std::vector<RealGradient> >& dphi = fe_h->get_dphi();
 
-	// The element shape functions for the pressure variable
-	// evaluated at the quadrature points.
-	const std::vector<std::vector<Real> >& psi = fe_my->get_phi();
-
 	// A reference to the \p DofMap object for this system.  The \p DofMap
 	// object handles the index translation from node and element numbers
 	// to degree of freedom numbers.  We will talk more about the \p DofMap
@@ -270,18 +273,18 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	DenseMatrix<Number> Ke;
 	DenseVector<Number> Fe;
 
-	DenseSubMatrix<Number> Khh(Ke), Khmx(Ke), Khmy(Ke), Kmxh(Ke), Kmxmx(Ke),
-			Kmxmy(Ke), Kmyh(Ke), Kmymx(Ke), Kmymy(Ke);
+	DenseSubMatrix<Number> Khh(Ke), Khp(Ke), Khq(Ke), Kph(Ke), Kpp(Ke), Kpq(Ke),
+			Kqh(Ke), Kqp(Ke), Kqq(Ke);
 
-	DenseSubVector<Number> Fh(Fe), Fmx(Fe), Fmy(Fe);
+	DenseSubVector<Number> Fh(Fe), Fp(Fe), Fq(Fe);
 
 	// This vector will hold the degree of freedom indices for
 	// the element.  These define where in the global system
 	// the element degrees of freedom get mapped.
 	std::vector<dof_id_type> dof_ind;
 	std::vector<dof_id_type> dof_ind_h;
-	std::vector<dof_id_type> dof_ind_mx;
-	std::vector<dof_id_type> dof_ind_my;
+	std::vector<dof_id_type> dof_ind_p;
+	std::vector<dof_id_type> dof_ind_q;
 
 	// Find out what the timestep size parameter is from the system, and
 	// the value of theta for the theta method.  We use implicit Euler (theta=1)
@@ -319,20 +322,19 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// contribute to.
 		dof_map.dof_indices(elem, dof_ind);
 		dof_map.dof_indices(elem, dof_ind_h, h_var);
-		dof_map.dof_indices(elem, dof_ind_mx, mx_var);
-		dof_map.dof_indices(elem, dof_ind_my, my_var);
+		dof_map.dof_indices(elem, dof_ind_p, p_var);
+		dof_map.dof_indices(elem, dof_ind_q, q_var);
 
 		const unsigned int n_dofs = dof_ind.size();
 		const unsigned int n_h_dofs = dof_ind_h.size();
-		const unsigned int n_mx_dofs = dof_ind_mx.size();
-		const unsigned int n_my_dofs = dof_ind_my.size();
+		const unsigned int n_p_dofs = dof_ind_p.size();
+		const unsigned int n_q_dofs = dof_ind_q.size();
 
 		// Compute the element-specific data for the current
 		// element.  This involves computing the location of the
 		// quadrature points (q_point) and the shape functions
 		// (phi, dphi) for the current element.
 		fe_h->reinit(elem);
-		fe_my->reinit(elem);
 
 		// Zero the element matrix and right-hand side before
 		// summing them.  We use the resize member here because
@@ -357,28 +359,20 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// Similarly, the \p DenseSubVector.reposition () member
 		// takes the (row_offset, row_size)
 		Khh.reposition(h_var * n_h_dofs, h_var * n_h_dofs, n_h_dofs, n_h_dofs);
-		Khmx.reposition(h_var * n_h_dofs, mx_var * n_h_dofs, n_h_dofs,
-				n_mx_dofs);
-		Khmy.reposition(h_var * n_h_dofs, my_var * n_h_dofs, n_h_dofs,
-				n_my_dofs);
+		Khp.reposition(h_var * n_h_dofs, p_var * n_h_dofs, n_h_dofs, n_p_dofs);
+		Khq.reposition(h_var * n_h_dofs, q_var * n_h_dofs, n_h_dofs, n_q_dofs);
 
-		Kmxh.reposition(mx_var * n_mx_dofs, h_var * n_mx_dofs, n_mx_dofs,
-				n_h_dofs);
-		Kmxmx.reposition(mx_var * n_mx_dofs, mx_var * n_mx_dofs, n_mx_dofs,
-				n_mx_dofs);
-		Kmxmy.reposition(mx_var * n_mx_dofs, my_var * n_mx_dofs, n_mx_dofs,
-				n_my_dofs);
+		Kph.reposition(p_var * n_p_dofs, h_var * n_p_dofs, n_p_dofs, n_h_dofs);
+		Kpp.reposition(p_var * n_p_dofs, p_var * n_p_dofs, n_p_dofs, n_p_dofs);
+		Kpq.reposition(p_var * n_p_dofs, q_var * n_p_dofs, n_p_dofs, n_q_dofs);
 
-		Kmyh.reposition(my_var * n_h_dofs, h_var * n_h_dofs, n_my_dofs,
-				n_h_dofs);
-		Kmymx.reposition(my_var * n_h_dofs, mx_var * n_h_dofs, n_my_dofs,
-				n_mx_dofs);
-		Kmymy.reposition(my_var * n_h_dofs, my_var * n_h_dofs, n_my_dofs,
-				n_my_dofs);
+		Kqh.reposition(q_var * n_h_dofs, h_var * n_h_dofs, n_q_dofs, n_h_dofs);
+		Kqp.reposition(q_var * n_h_dofs, p_var * n_h_dofs, n_q_dofs, n_p_dofs);
+		Kqq.reposition(q_var * n_h_dofs, q_var * n_h_dofs, n_q_dofs, n_q_dofs);
 
 		Fh.reposition(h_var * n_h_dofs, n_h_dofs);
-		Fmx.reposition(mx_var * n_h_dofs, n_mx_dofs);
-		Fmy.reposition(my_var * n_h_dofs, n_my_dofs);
+		Fp.reposition(p_var * n_h_dofs, n_p_dofs);
+		Fq.reposition(q_var * n_h_dofs, n_q_dofs);
 
 //		perf_log.pop("elem_init");
 
@@ -387,44 +381,49 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 
 			// Values to hold the solution & its gradient at the previous timestep.
 			Number h = 0., h_old = 0.;
-			Number mx = 0., mx_old = 0.;
-			Number my_old = 0.;
+			Number p = 0., p_old = 0.;
+			Number q = 0., q_old = 0.;
 			Gradient grad_h, grad_h_old;
-			Gradient grad_mx, grad_mx_old;
+			Gradient grad_p, grad_p_old;
+			Gradient grad_q, grad_q_old;
 
 			// Compute the velocity & its gradient from the previous timestep
 			// and the old Newton iterate.
 			for (unsigned int l = 0; l < n_h_dofs; l++) {
 				// From the old timestep:
 				h_old += phi[l][qp] * system.old_solution(dof_ind_h[l]);
-				mx_old += phi[l][qp] * system.old_solution(dof_ind_mx[l]);
+				p_old += phi[l][qp] * system.old_solution(dof_ind_p[l]);
+				q_old += phi[l][qp] * system.old_solution(dof_ind_p[l]);
 				grad_h_old.add_scaled(dphi[l][qp],
 						system.old_solution(dof_ind_h[l]));
-				grad_mx_old.add_scaled(dphi[l][qp],
-						system.old_solution(dof_ind_mx[l]));
+				grad_p_old.add_scaled(dphi[l][qp],
+						system.old_solution(dof_ind_p[l]));
+				grad_q_old.add_scaled(dphi[l][qp],
+										system.old_solution(dof_ind_q[l]));
 
 				// From the previous Newton iterate:
 				h += phi[l][qp] * system.current_solution(dof_ind_h[l]);
-				mx += phi[l][qp] * system.current_solution(dof_ind_mx[l]);
+				p += phi[l][qp] * system.current_solution(dof_ind_p[l]);
+				q += phi[l][qp] * system.current_solution(dof_ind_q[l]);
+
 				grad_h.add_scaled(dphi[l][qp],
 						system.current_solution(dof_ind_h[l]));
-				grad_mx.add_scaled(dphi[l][qp],
-						system.current_solution(dof_ind_mx[l]));
-			}
-
-			// Compute the old pressure value at this quadrature point.
-			for (unsigned int l = 0; l < n_my_dofs; l++) {
-				my_old += psi[l][qp] * system.old_solution(dof_ind_my[l]);
+				grad_p.add_scaled(dphi[l][qp],
+						system.current_solution(dof_ind_p[l]));
+				grad_q.add_scaled(dphi[l][qp],
+										system.current_solution(dof_ind_q[l]));
 			}
 
 			// Definitions for convenience.  It is sometimes simpler to do a
 			// dot product if you have the full vector at your disposal.
-			const NumberVectorValue H_old(h_old, mx_old);
-			const NumberVectorValue H(h, mx);
+			const NumberVectorValue H_old(h_old, p_old, q_old);
+			const NumberVectorValue H(h, p, q);
 			const Number h_x = grad_h(0);
 			const Number h_y = grad_h(1);
-			const Number mx_x = grad_mx(0);
-			const Number mx_y = grad_mx(1);
+			const Number p_x = grad_p(0);
+			const Number p_y = grad_p(1);
+			const Number q_x = grad_q(0);
+			const Number q_y = grad_q(1);
 
 			// First, an i-loop over the velocity degrees of freedom.
 			// We know that n_u_dofs == n_v_dofs so we can compute contributions
@@ -432,15 +431,21 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 			for (unsigned int i = 0; i < n_h_dofs; i++) {
 				Fh(i) += JxW[qp] * (h_old * phi[i][qp] -    // mass-matrix term
 						(1. - theta) * dt * (H_old * grad_h_old) * phi[i][qp] + // convection term
-						(1. - theta) * dt * my_old * dphi[i][qp](0) - // pressure term on rhs
+						(1. - theta) * dt * q_old * dphi[i][qp](0) - // pressure term on rhs
 						(1. - theta) * dt * (grad_h_old * dphi[i][qp]) + // diffusion term on rhs
 						theta * dt * (H * grad_h) * phi[i][qp]);  // Newton term
 
-				Fmx(i) += JxW[qp] * (mx_old * phi[i][qp] -  // mass-matrix term
-						(1. - theta) * dt * (H_old * grad_mx_old) * phi[i][qp] + // convection term
-						(1. - theta) * dt * my_old * dphi[i][qp](1) - // pressure term on rhs
-						(1. - theta) * dt * (grad_mx_old * dphi[i][qp]) + // diffusion term on rhs
-						theta * dt * (H * grad_mx) * phi[i][qp]); // Newton term
+				Fp(i) += JxW[qp] * (p_old * phi[i][qp] -  // mass-matrix term
+						(1. - theta) * dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
+						(1. - theta) * dt * q_old * dphi[i][qp](1) - // pressure term on rhs
+						(1. - theta) * dt * (grad_p_old * dphi[i][qp]) + // diffusion term on rhs
+						theta * dt * (H * grad_p) * phi[i][qp]); // Newton term
+
+				Fq(i) += JxW[qp] * (p_old * phi[i][qp] -  // mass-matrix term
+						(1. - theta) * dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
+						(1. - theta) * dt * q_old * dphi[i][qp](1) - // pressure term on rhs
+						(1. - theta) * dt * (grad_p_old * dphi[i][qp]) + // diffusion term on rhs
+						theta * dt * (H * grad_p) * phi[i][qp]); // Newton term
 
 				// Note that the Fp block is identically zero unless we are using
 				// some kind of artificial compressibility scheme...
@@ -448,41 +453,35 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				// Matrix contributions for the uu and vv couplings.
 				for (unsigned int j = 0; j < n_h_dofs; j++) {
 					Khh(i, j) += JxW[qp] * (phi[i][qp] * phi[j][qp] + // mass matrix term
-							theta * dt * (dphi[i][qp] * dphi[j][qp]) + // diffusion term
 							theta * dt * (H * dphi[j][qp]) * phi[i][qp] + // convection term
 							theta * dt * h_x * phi[i][qp] * phi[j][qp]); // Newton term
 
-					Khmx(i, j) += JxW[qp] * theta * dt * h_y * phi[i][qp]
+					Khp(i, j) += JxW[qp] * theta * dt * h_y * phi[i][qp]
 							* phi[j][qp];     // Newton term
 
-					Kmxmx(i, j) += JxW[qp] * (phi[i][qp] * phi[j][qp] + // mass matrix term
-							theta * dt * (dphi[i][qp] * dphi[j][qp]) + // diffusion term
+					Khq(i, j) += JxW[qp] * theta * dt * h_y * phi[i][qp]
+							* phi[j][qp];     // Newton term
+
+					Kph(i, j) += JxW[qp] * (phi[i][qp] * phi[j][qp] + // mass matrix term
 							theta * dt * (H * dphi[j][qp]) * phi[i][qp] + // convection term
-							theta * dt * mx_y * phi[i][qp] * phi[j][qp]); // Newton term
+							theta * dt * p_y * phi[i][qp] * phi[j][qp]); // Newton term
 
-					Kmxh(i, j) += JxW[qp] * theta * dt * mx_x * phi[i][qp]
+					Kpp(i, j) += JxW[qp] * theta * dt * p_x * phi[i][qp]
 							* phi[j][qp];     // Newton term
-				}
 
-				// Matrix contributions for the up and vp couplings.
-				for (unsigned int j = 0; j < n_my_dofs; j++) {
-					Khmy(i, j) += JxW[qp]
-							* (-theta * dt * psi[j][qp] * dphi[i][qp](0));
-					Kmxmy(i, j) += JxW[qp]
-							* (-theta * dt * psi[j][qp] * dphi[i][qp](1));
+					Kpq(i, j) += JxW[qp]
+							* (-theta * dt * phi[j][qp] * dphi[i][qp](0));
+					Kqh(i, j) += JxW[qp]
+							* (-theta * dt * phi[j][qp] * dphi[i][qp](1));
+
+					Kqp(i, j) += JxW[qp]
+							* (-theta * dt * phi[j][qp] * dphi[i][qp](1));
+					Kqq(i, j) += JxW[qp]
+							* (-theta * dt * phi[j][qp] * dphi[i][qp](1));
+
 				}
 			}
 
-			// Now an i-loop over the pressure degrees of freedom.  This code computes
-			// the matrix entries due to the continuity equation.  Note: To maintain a
-			// symmetric matrix, we may (or may not) multiply the continuity equation by
-			// negative one.  Here we do not.
-			for (unsigned int i = 0; i < n_my_dofs; i++) {
-				for (unsigned int j = 0; j < n_h_dofs; j++) {
-					Kmyh(i, j) += JxW[qp] * psi[i][qp] * dphi[j][qp](0);
-					Kmymx(i, j) += JxW[qp] * psi[i][qp] * dphi[j][qp](1);
-				}
-			}
 		} // end of the quadrature point qp-loop
 
 		// At this point the interior element integration has
@@ -528,11 +527,11 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 							if (elem->node(n) == side->node(ns)) {
 								// Matrix contribution.
 								Khh(n, n) += penalty;
-								Kmxmx(n, n) += penalty;
+								Kpp(n, n) += penalty;
 
 								// Right-hand-side contribution.
 								Fh(n) += penalty * h_value;
-								Fmx(n) += penalty * mx_value;
+								Fp(n) += penalty * mx_value;
 							}
 					} // end face node loop
 				} // end if (elem->neighbor(side) == NULL)
@@ -546,8 +545,8 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				const Real my_value = 0.0;
 				for (unsigned int c = 0; c < elem->n_nodes(); c++)
 					if (elem->node(c) == pressure_node) {
-						Kmymy(c, c) += penalty;
-						Fmy(c) += penalty * my_value;
+						Kqq(c, c) += penalty;
+						Fq(c) += penalty * my_value;
 					}
 			}
 		} // end boundary condition section
@@ -565,5 +564,45 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	} // end of element loop
 
 	// That's it.
+	return;
+}
+
+void init_cd(EquationSystems& es, const std::string& system_name) {
+
+	libmesh_assert_equal_to(system_name, "SW");
+
+	// Get a reference to the Convection-Diffusion system object.
+	TransientLinearImplicitSystem & system = es.get_system<
+			TransientLinearImplicitSystem>("SW");
+
+	es.parameters.set<Real>("time") = system.time = 0;
+
+	system.project_solution(exact_value, NULL,es.parameters);
+
+	NumericVector<Number>& h = system.get_vector("h");
+	NumericVector<Number>& p = system.get_vector("p");
+	NumericVector<Number>& q = system.get_vector("q");
+
+	system.project_vector (h, exact_value, NULL,-1);
+
+    p.zero();
+    q.zero();
+
+	// Get a constant reference to the mesh object.
+//	const MeshBase& mesh = es.get_mesh();
+
+//	MeshBase::const_element_iterator el = mesh.active_local_elements_begin();
+//	const MeshBase::const_element_iterator end_el =
+//			mesh.active_local_elements_end();
+
+//	MeshBase::const_node_iterator node_it = mesh.nodes_begin();
+//	const MeshBase::const_node_iterator node_end = mesh.nodes_end();
+//
+//	for (; node_it != node_end; ++node_it) {
+//
+//		const Node* node = *node_it;
+//
+//	}
+
 	return;
 }
