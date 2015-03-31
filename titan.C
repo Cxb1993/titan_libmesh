@@ -68,17 +68,6 @@ using namespace libMesh;
 
 void assemble_sw(EquationSystems& es, const std::string& system_name);
 
-Real exact_solution(const Real x, const Real y) {
-	static const Real pi = acos(-1.);
-
-	return cos(.5 * pi * x) * sin(.5 * pi * y);
-}
-
-void exact_solution_wrapper(DenseVector<Number>& output, const Point& p,
-		const Real) {
-	output(0) = exact_solution(p(0), p(1));
-}
-
 int main(int argc, char** argv) {
 
 	LibMeshInit init(argc, argv);
@@ -89,9 +78,6 @@ int main(int argc, char** argv) {
 //
 //	mesh.read (argv[1]);
 	MeshTools::Generation::build_square(mesh, 15, 15, -1., 1., -1., 1., QUAD9);
-
-//	Making mesh 2nd order, this is if we want to go further later
-//	mesh.all_second_order();
 
 //	this is for writing mesh
 //	mesh.write (argv[2]);
@@ -205,11 +191,6 @@ int main(int argc, char** argv) {
 		}
 
 	} //end timestep loop.
-
-//	steady system solution and write
-//	es.get_system("SW").solve();
-//	system.solve();
-//	ExodusII_IO(mesh).write_equation_systems("out.e", es);
 
 	return 0;
 }
@@ -365,7 +346,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// Reposition the submatrices...  The idea is this:
 		//
 		//         -           -          -  -
-		//        | Khh  Khmx  Khmy  |        | Fh |
+		//        | Khh  Khmx  Khmy  |        | Fh  |
 		//   Ke = | Kmxh Kmxmx Kmxmy |;  Fe = | Fmx |
 		//        | Kmyh Kmymx Kmymy |        | Fmy |
 		//         -           -          -  -

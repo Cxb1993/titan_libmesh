@@ -1,7 +1,7 @@
 ######################################################################
 #
 # Template libMesh application Makefile
-LIBMESH_DIR ?= /dinesh1/data/users/haghakha/libmesh/petsc
+LIBMESH_DIR ?= /home/hossein/libmesh/dbglibmesh
 
 
 # include the library options determined by configure
