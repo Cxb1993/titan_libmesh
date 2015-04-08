@@ -297,7 +297,6 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// timesteps.  If you monitor the initial nonlinear residual for this
 	// simulation, you should see that it is monotonically decreasing in time.
 	const Real dt = es.parameters.get<Real>("dt");
-	const Real theta = 1.;
 
 	// Now we will loop over all the elements in the mesh that
 	// live on the local processor. We will compute the element
@@ -430,55 +429,39 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 			// for both at the same time.
 			for (unsigned int i = 0; i < n_h_dofs; i++) {
 				Fh(i) += JxW[qp] * (h_old * phi[i][qp] -    // mass-matrix term
-						(1. - theta) * dt * (H_old * grad_h_old) * phi[i][qp] + // convection term
-						(1. - theta) * dt * q_old * dphi[i][qp](0) - // pressure term on rhs
-						(1. - theta) * dt * (grad_h_old * dphi[i][qp]) + // diffusion term on rhs
-						theta * dt * (H * grad_h) * phi[i][qp]);  // Newton term
+						 dt * (H_old * grad_h_old) * phi[i][qp] + // convection term
+						 dt * q_old * dphi[i][qp](0) - // pressure term on rhs
+						 dt * (grad_h_old * dphi[i][qp])); // diffusion term on rhs
+
 
 				Fp(i) += JxW[qp] * (p_old * phi[i][qp] -  // mass-matrix term
-						(1. - theta) * dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
-						(1. - theta) * dt * q_old * dphi[i][qp](1) - // pressure term on rhs
-						(1. - theta) * dt * (grad_p_old * dphi[i][qp]) + // diffusion term on rhs
-						theta * dt * (H * grad_p) * phi[i][qp]); // Newton term
+						 dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
+						 dt * q_old * dphi[i][qp](1) - // pressure term on rhs
+						 dt * (grad_p_old * dphi[i][qp])) ; // diffusion term on rhs
+
 
 				Fq(i) += JxW[qp] * (p_old * phi[i][qp] -  // mass-matrix term
-						(1. - theta) * dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
-						(1. - theta) * dt * q_old * dphi[i][qp](1) - // pressure term on rhs
-						(1. - theta) * dt * (grad_p_old * dphi[i][qp]) + // diffusion term on rhs
-						theta * dt * (H * grad_p) * phi[i][qp]); // Newton term
+						dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
+						dt * q_old * dphi[i][qp](1) - // pressure term on rhs
+						dt * (grad_p_old * dphi[i][qp])); // diffusion term on rhs
+
 
 				// Note that the Fp block is identically zero unless we are using
 				// some kind of artificial compressibility scheme...
 
 				// Matrix contributions for the uu and vv couplings.
 				for (unsigned int j = 0; j < n_h_dofs; j++) {
-					Khh(i, j) += JxW[qp] * (phi[i][qp] * phi[j][qp] + // mass matrix term
-							theta * dt * (H * dphi[j][qp]) * phi[i][qp] + // convection term
-							theta * dt * h_x * phi[i][qp] * phi[j][qp]); // Newton term
+					Khh(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp];// mass matrix term
+					Khp(i, j) += 0;
+					Khq(i, j) += 0;
 
-					Khp(i, j) += JxW[qp] * theta * dt * h_y * phi[i][qp]
-							* phi[j][qp];     // Newton term
+					Kph(i, j) += 0;
+					Kpp(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp]; // mass matrix term;
+					Kpq(i, j) += 0;
 
-					Khq(i, j) += JxW[qp] * theta * dt * h_y * phi[i][qp]
-							* phi[j][qp];     // Newton term
-
-					Kph(i, j) += JxW[qp] * (phi[i][qp] * phi[j][qp] + // mass matrix term
-							theta * dt * (H * dphi[j][qp]) * phi[i][qp] + // convection term
-							theta * dt * p_y * phi[i][qp] * phi[j][qp]); // Newton term
-
-					Kpp(i, j) += JxW[qp] * theta * dt * p_x * phi[i][qp]
-							* phi[j][qp];     // Newton term
-
-					Kpq(i, j) += JxW[qp]
-							* (-theta * dt * phi[j][qp] * dphi[i][qp](0));
-					Kqh(i, j) += JxW[qp]
-							* (-theta * dt * phi[j][qp] * dphi[i][qp](1));
-
-					Kqp(i, j) += JxW[qp]
-							* (-theta * dt * phi[j][qp] * dphi[i][qp](1));
-					Kqq(i, j) += JxW[qp]
-							* (-theta * dt * phi[j][qp] * dphi[i][qp](1));
-
+					Kqh(i, j) += 0;
+					Kqp(i, j) += 0;
+					Kqq(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp]; // mass matrix term
 				}
 			}
 
@@ -583,7 +566,7 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 	NumericVector<Number>& p = system.get_vector("p");
 	NumericVector<Number>& q = system.get_vector("q");
 
-	system.project_vector (h, exact_value, NULL,-1);
+	//system.project_vector (h, exact_value, NULL,-1);
 
     p.zero();
     q.zero();
