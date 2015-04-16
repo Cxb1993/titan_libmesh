@@ -72,8 +72,8 @@ void init_cd(EquationSystems& es, const std::string& system_name);
 Real exact_solution(const Real x, const Real y){
 
 	Real h=0.;
-	if (x*x+y*y<=.1)
-		h = 1;
+	if ((x*x+y*y)<=.1)
+		h = 1.0;
 	return h;
 }
 
@@ -475,64 +475,64 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// is equivalent (for Lagrange basis functions) to lumping
 		// the matrix resulting from the L2 projection penalty
 		// approach introduced in example 3.
-		{
-			// The penalty value.  \f$ \frac{1}{\epsilon} \f$
-			const Real penalty = 1.e10;
-
-			// The following loops over the sides of the element.
-			// If the element has no neighbor on a side then that
-			// side MUST live on a boundary of the domain.
-			for (unsigned int s = 0; s < elem->n_sides(); s++)
-				if (elem->neighbor(s) == NULL) {
-					AutoPtr<Elem> side(elem->build_side(s));
-
-					// Loop over the nodes on the side.
-					for (unsigned int ns = 0; ns < side->n_nodes(); ns++) {
-						// Boundary ids are set internally by
-						// build_square().
-						// 0=bottom
-						// 1=right
-						// 2=top
-						// 3=left
-
-						// Set u = 1 on the top boundary, 0 everywhere else
-						const Real h_value =
-								(mesh.get_boundary_info().has_boundary_id(elem,
-										s, 2)) ? 1. : 0.;
-
-						// Set v = 0 everywhere
-						const Real mx_value = 0.;
-
-						// Find the node on the element matching this node on
-						// the side.  That defined where in the element matrix
-						// the boundary condition will be applied.
-						for (unsigned int n = 0; n < elem->n_nodes(); n++)
-							if (elem->node(n) == side->node(ns)) {
-								// Matrix contribution.
-								Khh(n, n) += penalty;
-								Kpp(n, n) += penalty;
-
-								// Right-hand-side contribution.
-								Fh(n) += penalty * h_value;
-								Fp(n) += penalty * mx_value;
-							}
-					} // end face node loop
-				} // end if (elem->neighbor(side) == NULL)
-
-			// Pin the pressure to zero at global node number "pressure_node".
-			// This effectively removes the non-trivial null space of constant
-			// pressure solutions.
-			const bool pin_pressure = true;
-			if (pin_pressure) {
-				const unsigned int pressure_node = 0;
-				const Real my_value = 0.0;
-				for (unsigned int c = 0; c < elem->n_nodes(); c++)
-					if (elem->node(c) == pressure_node) {
-						Kqq(c, c) += penalty;
-						Fq(c) += penalty * my_value;
-					}
-			}
-		} // end boundary condition section
+//		{
+//			// The penalty value.  \f$ \frac{1}{\epsilon} \f$
+//			const Real penalty = 1.e10;
+//
+//			// The following loops over the sides of the element.
+//			// If the element has no neighbor on a side then that
+//			// side MUST live on a boundary of the domain.
+//			for (unsigned int s = 0; s < elem->n_sides(); s++)
+//				if (elem->neighbor(s) == NULL) {
+//					AutoPtr<Elem> side(elem->build_side(s));
+//
+//					// Loop over the nodes on the side.
+//					for (unsigned int ns = 0; ns < side->n_nodes(); ns++) {
+//						// Boundary ids are set internally by
+//						// build_square().
+//						// 0=bottom
+//						// 1=right
+//						// 2=top
+//						// 3=left
+//
+//						// Set u = 1 on the top boundary, 0 everywhere else
+//						const Real h_value =
+//								(mesh.get_boundary_info().has_boundary_id(elem,
+//										s, 2)) ? 1. : 0.;
+//
+//						// Set v = 0 everywhere
+//						const Real mx_value = 0.;
+//
+//						// Find the node on the element matching this node on
+//						// the side.  That defined where in the element matrix
+//						// the boundary condition will be applied.
+//						for (unsigned int n = 0; n < elem->n_nodes(); n++)
+//							if (elem->node(n) == side->node(ns)) {
+//								// Matrix contribution.
+//								Khh(n, n) += penalty;
+//								Kpp(n, n) += penalty;
+//
+//								// Right-hand-side contribution.
+//								Fh(n) += penalty * h_value;
+//								Fp(n) += penalty * mx_value;
+//							}
+//					} // end face node loop
+//				} // end if (elem->neighbor(side) == NULL)
+//
+//			// Pin the pressure to zero at global node number "pressure_node".
+//			// This effectively removes the non-trivial null space of constant
+//			// pressure solutions.
+//			const bool pin_pressure = true;
+//			if (pin_pressure) {
+//				const unsigned int pressure_node = 0;
+//				const Real my_value = 0.0;
+//				for (unsigned int c = 0; c < elem->n_nodes(); c++)
+//					if (elem->node(c) == pressure_node) {
+//						Kqq(c, c) += penalty;
+//						Fq(c) += penalty * my_value;
+//					}
+//			}
+//		} // end boundary condition section
 
 		// If this assembly program were to be used on an adaptive mesh,
 		// we would have to apply any hanging node constraint equations.
@@ -562,14 +562,14 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 
 	system.project_solution(exact_value, NULL,es.parameters);
 
-	NumericVector<Number>& h = system.get_vector("h");
-	NumericVector<Number>& p = system.get_vector("p");
-	NumericVector<Number>& q = system.get_vector("q");
+	//NumericVector<Number>& h = system.get_vector("h");
+	//NumericVector<Number>& p = system.get_vector("p");
+	//NumericVector<Number>& q = system.get_vector("q");
 
 	//system.project_vector (h, exact_value, NULL,-1);
 
-    p.zero();
-    q.zero();
+    //p.zero();
+    //q.zero();
 
 	// Get a constant reference to the mesh object.
 //	const MeshBase& mesh = es.get_mesh();
