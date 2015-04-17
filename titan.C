@@ -62,7 +62,7 @@
 
 #include "libmesh/utility.h"
 
-inline const double GEOFLOW_TINY = 0.0001
+const double GEOFLOW_TINY = 0.0001;
 
 // Bring in everything from the libMesh namespace
 using namespace libMesh;
@@ -79,10 +79,16 @@ Real exact_solution(const Real x, const Real y) {
 	return h;
 }
 
-Number exact_value(const Point& p, const Parameters& parameters,
-		const std::string&, const std::string&) {
+Number exact_value(const Point& p, const Parameters& parameters, const std::string&,
+    const std::string&) {
 	return exact_solution(p(0), p(1));
 }
+
+template<typename T> inline T sign(T t) {
+	return (t < -1) ? -1 : 1;
+}
+
+Number compute_kap(Number vx_x, Number vy_y, Number bedfric, Number intfric);
 
 int main(int argc, char** argv) {
 
@@ -93,7 +99,7 @@ int main(int argc, char** argv) {
 //	std::string mesh_file = argv[1];//first input is the binary name
 //
 //	mesh.read (argv[1]);
-	MeshTools::Generation::build_square(mesh, 15, 15, -1., 1., -1., 1., QUAD9);
+	MeshTools::Generation::build_square(mesh, 4, 4, -1., 1., -1., 1., QUAD9);
 
 //	this is for writing mesh
 //	mesh.write (argv[2]);
@@ -105,14 +111,16 @@ int main(int argc, char** argv) {
 	es.parameters.set<Real>("dummy") = 42.;
 
 	// read simulation parameters from file
-//	GetPot args = GetPot("simulation.data");
-//	double bed_fric = args("material/friction/bed", 35.0);
-//	double inter_fric = args("material/friction/internal", 25.0);
+	GetPot args = GetPot("simulation.data");
+	double bed_fric = args("material/friction/bed", 35.0);
+	double inter_fric = args("material/friction/internal", 25.0);
+
+	es.parameters.set<Number>("bed_fric") = bed_fric * pi / 180.;
+	es.parameters.set<Number>("int_fric") = inter_fric * pi / 180.;
 
 //	the only system of equation we have
 //	es.add_system<FEMSystem>("SW");
-	TransientLinearImplicitSystem& system = es.add_system<
-			TransientLinearImplicitSystem>("SW");
+	TransientLinearImplicitSystem& system = es.add_system<TransientLinearImplicitSystem>("SW");
 
 //	first we just create height
 //	unsigned int h_var = es.get_system("SW").add_variable("h", SECOND);
@@ -139,7 +147,7 @@ int main(int argc, char** argv) {
 	es.parameters.set<unsigned int>("linear solver maximum iterations") = 250;
 	es.parameters.set<Real>("linear solver tolerance") = TOLERANCE;
 
-	const Real dt = 0.01;
+	const Real dt = 0.0001;
 	system.time = 0.0;
 	const unsigned int n_timesteps = 15;
 
@@ -148,29 +156,26 @@ int main(int argc, char** argv) {
 
 	es.parameters.set<Real>("dt") = dt;
 
-	AutoPtr<NumericVector<Number> > last_nonlinear_soln(
-			system.solution->clone());
+	AutoPtr<NumericVector<Number> > last_nonlinear_soln(system.solution->clone());
 
 	for (unsigned int t_step = 0; t_step < n_timesteps; ++t_step) {
 		std::ostringstream file_name;
 		if (t_step == 0) {
 
-			file_name << "out_" << std::setw(3) << std::setfill('0')
-					<< std::right << t_step << ".e";
+			file_name << "out_" << std::setw(3) << std::setfill('0') << std::right << t_step << ".e";
 
 			ExodusII_IO(mesh).write_equation_systems(file_name.str(), es);
 		}
 
 		system.time += dt;
 
-		std::cout << "\n\n*** Solving time step " << t_step << ", time = "
-				<< system.time << " ***" << std::endl;
+		std::cout << "\n\n*** Solving time step " << t_step << ", time = " << system.time << " ***"
+		    << std::endl;
 
 		*system.old_local_solution = *system.current_local_solution;
 
 		const Real initial_linear_solver_tol = 1.e-6;
-		es.parameters.set<Real>("linear solver tolerance") =
-				initial_linear_solver_tol;
+		es.parameters.set<Real>("linear solver tolerance") = initial_linear_solver_tol;
 
 		for (unsigned int l = 0; l < n_nonlinear_steps; ++l) {
 			last_nonlinear_soln->zero();
@@ -184,34 +189,28 @@ int main(int argc, char** argv) {
 
 			const Real norm_delta = last_nonlinear_soln->l2_norm();
 
-			const unsigned int n_linear_iterations =
-					system.n_linear_iterations();
+			const unsigned int n_linear_iterations = system.n_linear_iterations();
 
 			const Real final_linear_residual = system.final_linear_residual();
-			std::cout << "Linear solver converged at step: "
-					<< n_linear_iterations << ", final residual: "
-					<< final_linear_residual
-					<< "  Nonlinear convergence: ||u - u_old|| = " << norm_delta
-					<< std::endl;
+			std::cout << "Linear solver converged at step: " << n_linear_iterations
+			    << ", final residual: " << final_linear_residual
+			    << "  Nonlinear convergence: ||u - u_old|| = " << norm_delta << std::endl;
 
 			if ((norm_delta < nonlinear_tolerance)
-					&& (system.final_linear_residual() < nonlinear_tolerance)) {
-				std::cout << " Nonlinear solver converged at step " << l
-						<< std::endl;
+			    && (system.final_linear_residual() < nonlinear_tolerance)) {
+				std::cout << " Nonlinear solver converged at step " << l << std::endl;
 				break;
 			}
 
 			es.parameters.set<Real>("linear solver tolerance") = std::min(
-					Utility::pow<2>(final_linear_residual),
-					initial_linear_solver_tol);
+			    Utility::pow<2>(final_linear_residual), initial_linear_solver_tol);
 
 		} // end nonlinear loop
 
 		const unsigned int write_interval = 1;
 		if ((t_step + 1) % write_interval == 0) {
 			std::ostringstream file_name;
-			file_name << "out_" << std::setw(3) << std::setfill('0')
-					<< std::right << t_step + 1 << ".e";
+			file_name << "out_" << std::setw(3) << std::setfill('0') << std::right << t_step + 1 << ".e";
 
 			ExodusII_IO(mesh).write_equation_systems(file_name.str(), es);
 		}
@@ -235,8 +234,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	const unsigned int dim = mesh.mesh_dimension();
 
 	// Get a reference to the Convection-Diffusion system object.
-	TransientLinearImplicitSystem & system = es.get_system<
-			TransientLinearImplicitSystem>("SW");
+	TransientLinearImplicitSystem & system = es.get_system<TransientLinearImplicitSystem>("SW");
 
 	// Numeric ids corresponding to each variable in the system
 	const unsigned int h_var = system.variable_number("h");
@@ -284,8 +282,8 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	DenseMatrix<Number> Ke;
 	DenseVector<Number> Fe;
 
-	DenseSubMatrix<Number> Khh(Ke), Khp(Ke), Khq(Ke), Kph(Ke), Kpp(Ke), Kpq(Ke),
-			Kqh(Ke), Kqp(Ke), Kqq(Ke);
+	DenseSubMatrix<Number> Khh(Ke), Khp(Ke), Khq(Ke), Kph(Ke), Kpp(Ke), Kpq(Ke), Kqh(Ke), Kqp(Ke),
+	    Kqq(Ke);
 
 	DenseSubVector<Number> Fh(Fe), Fp(Fe), Fq(Fe);
 
@@ -309,6 +307,10 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// simulation, you should see that it is monotonically decreasing in time.
 	const Real dt = es.parameters.get<Real>("dt");
 
+	const Number intfric = es.parameters.get<Number>("int_fric");
+
+	const Number bedfric = es.parameters.get<Number>("bed_fric");
+
 	// Now we will loop over all the elements in the mesh that
 	// live on the local processor. We will compute the element
 	// matrix and right-hand-side contribution.  In case users later
@@ -317,8 +319,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// the \p active_elem_iterator.
 
 	MeshBase::const_element_iterator el = mesh.active_local_elements_begin();
-	const MeshBase::const_element_iterator end_el =
-			mesh.active_local_elements_end();
+	const MeshBase::const_element_iterator end_el = mesh.active_local_elements_end();
 
 	for (; el != end_el; ++el) {
 		// Store a pointer to the element we are currently
@@ -404,57 +405,89 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				h_old += phi[l][qp] * system.old_solution(dof_ind_h[l]);
 				p_old += phi[l][qp] * system.old_solution(dof_ind_p[l]);
 				q_old += phi[l][qp] * system.old_solution(dof_ind_p[l]);
-				grad_h_old.add_scaled(dphi[l][qp],
-						system.old_solution(dof_ind_h[l]));
-				grad_p_old.add_scaled(dphi[l][qp],
-						system.old_solution(dof_ind_p[l]));
-				grad_q_old.add_scaled(dphi[l][qp],
-						system.old_solution(dof_ind_q[l]));
+				grad_h_old.add_scaled(dphi[l][qp], system.old_solution(dof_ind_h[l]));
+				grad_p_old.add_scaled(dphi[l][qp], system.old_solution(dof_ind_p[l]));
+				grad_q_old.add_scaled(dphi[l][qp], system.old_solution(dof_ind_q[l]));
 
 				// From the previous Newton iterate:
 				h += phi[l][qp] * system.current_solution(dof_ind_h[l]);
 				p += phi[l][qp] * system.current_solution(dof_ind_p[l]);
 				q += phi[l][qp] * system.current_solution(dof_ind_q[l]);
 
-				grad_h.add_scaled(dphi[l][qp],
-						system.current_solution(dof_ind_h[l]));
-				grad_p.add_scaled(dphi[l][qp],
-						system.current_solution(dof_ind_p[l]));
-				grad_q.add_scaled(dphi[l][qp],
-						system.current_solution(dof_ind_q[l]));
+				grad_h.add_scaled(dphi[l][qp], system.current_solution(dof_ind_h[l]));
+				grad_p.add_scaled(dphi[l][qp], system.current_solution(dof_ind_p[l]));
+				grad_q.add_scaled(dphi[l][qp], system.current_solution(dof_ind_q[l]));
 			}
 
 			// Definitions for convenience.  It is sometimes simpler to do a
 			// dot product if you have the full vector at your disposal.
 			const NumberVectorValue H_old(h_old, p_old, q_old);
 			const NumberVectorValue H(h, p, q);
-			const Number h_x = grad_h(0);
-			const Number h_y = grad_h(1);
-			const Number p_x = grad_p(0);
-			const Number p_y = grad_p(1);
-			const Number q_x = grad_q(0);
-			const Number q_y = grad_q(1);
+			const Number h_x = grad_h_old(0);
+			const Number h_y = grad_h_old(1);
+			const Number p_x = grad_p_old(0);
+			const Number p_y = grad_p_old(1);
+			const Number q_x = grad_q_old(0);
+			const Number q_y = grad_q_old(1);
 
 			// First, an i-loop over the velocity degrees of freedom.
 			// We know that n_u_dofs == n_v_dofs so we can compute contributions
 			// for both at the same time.
 			for (unsigned int i = 0; i < n_h_dofs; i++) {
 				Fh(i) += JxW[qp] * (h_old * phi[i][qp] +    // mass-matrix term
-						dt * p_old * dphi[i][qp](0) + // Flux x term for height term
-						dt * q_old * dphi[i][qp](0)); // Flux y term for height term
+				    dt * p_old * dphi[i][qp](0) + // Flux x term for height term
+				    dt * q_old * dphi[i][qp](0)); // Flux y term for height term
 
 				if (h_old > GEOFLOW_TINY) { // actually here hast be based on h not h_old, but here we just want to continue
 
-					Fp (i)
-					+= JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
-							dt * (p_old * p_old / h_old + .5 *k_ap* gz * h_old) * dphi[i][qp](1) +// Flux x term for momentum in x direction
-							dt * p_old * q_old / h_old * dphi[i][qp](1) +
-							dt * (gx * h_old - h_old*k_ap) phi[i][qp] );// Flux y term for momentum in x direction
+					const Number vx = p_old / h_old;
+					const Number vy = q_old / h_old;
+					const Number h_inv = 1 / h_old;
+					const Number vel = sqrt(vx * vx + vy * vy);
 
-					Fq(i) += JxW[qp] * (p_old * phi[i][qp] - // mass-matrix term
-							dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
-							dt * q_old * dphi[i][qp](1) - // pressure term on rhs
-							dt * (grad_p_old * dphi[i][qp])); // diffusion term on rhs
+					const Number gx = 0.; // this has to be corrected later
+					const Number gy = 0.; // this has to be corrected later
+					const Number gz = -9.8; // this has to be corrected later
+
+					const Number g_x = 0.; // this has to be corrected later
+					const Number g_y = 0.; // this has to be corrected later
+					//const Number g_z = 0.; // this has to be corrected later
+
+					const Number vx_x = h_inv * (p_x - vx * h_x);
+					const Number vx_y = h_inv * (p_y - vx * h_y);
+
+					const Number vy_x = h_inv * (q_x - vy * h_x);
+					const Number vy_y = h_inv * (q_y - vy * h_y);
+
+					const Number k_ap = compute_kap(vx_x, vy_y, bedfric, intfric);
+					const Number invcurve = 0.; // this has to be corrected later
+
+					// x source terms
+					const Number sx1 = gx * h_old; // hydrostatic pressure
+					const Number sx2 = h_old * k_ap * sign(vx_y) * g_y * h_y * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
+					const Number sx3 = vx / vel * tan(bedfric) * (gz * h_old + h_old * vx * invcurve);
+
+					// y source terms
+					const Number sy1 = gy * h_old; // hydrostatic pressure
+					const Number sy2 = h_old * k_ap * sign(vy_x) * g_x * h_x * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
+					const Number sy3 = vy / vel * tan(bedfric) * (gz * h_old + h_old * vy * invcurve);
+
+					Fp(i) += JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
+					    dt * (p_old * vx + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux x term for momentum in x direction
+					    dt * p_old * vy * dphi[i][qp](1) +  // Flux y term for momentum in x direction
+					    dt * (sx1 - sx2 - sx3) * phi[i][qp]);
+
+					Fq(i) += JxW[qp] * (q_old * phi[i][qp] +  // mass-matrix term
+					    dt * q_old * vx * dphi[i][qp](1) +  // Flux x term for momentum in y direction
+					    dt * (q_old * vy + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux y term for momentum in y direction
+					    dt * (sy1 - sy2 - sy3) * phi[i][qp]);
+
+				} else {
+
+					Fp(i) += JxW[qp] * p_old * phi[i][qp];
+
+					Fq(i) += JxW[qp] * q_old * phi[i][qp];
+
 				}
 
 				// Note that the Fp block is identically zero unless we are using
@@ -566,8 +599,7 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 	libmesh_assert_equal_to(system_name, "SW");
 
 	// Get a reference to the Convection-Diffusion system object.
-	TransientLinearImplicitSystem & system = es.get_system<
-			TransientLinearImplicitSystem>("SW");
+	TransientLinearImplicitSystem & system = es.get_system<TransientLinearImplicitSystem>("SW");
 
 	es.parameters.set<Real>("time") = system.time = 0;
 
@@ -599,4 +631,25 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 //	}
 
 	return;
+}
+Number compute_kap(Number vx_x, Number vy_y, Number bedfric, Number intfric) {
+
+	Number kap;
+
+	Number passive = sign(vx_x + vy_y);
+
+	if (passive == 0) {
+
+		kap = 0.;
+		return kap;
+
+	} else {
+
+		kap = 2.
+		    * (1.
+		        - passive * sqrt(1. - cos(intfric) * cos(intfric) * (1. + tan(bedfric) * tan(bedfric))))
+		    / cos(intfric) * cos(intfric) - 1.;
+		return kap;
+	}
+
 }
