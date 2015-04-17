@@ -62,6 +62,8 @@
 
 #include "libmesh/utility.h"
 
+inline const double GEOFLOW_TINY = 0.0001
+
 // Bring in everything from the libMesh namespace
 using namespace libMesh;
 
@@ -69,10 +71,10 @@ void assemble_sw(EquationSystems& es, const std::string& system_name);
 
 void init_cd(EquationSystems& es, const std::string& system_name);
 
-Real exact_solution(const Real x, const Real y){
+Real exact_solution(const Real x, const Real y) {
 
-	Real h=0.;
-	if ((x*x+y*y)<=.1)
+	Real h = 0.;
+	if ((x * x + y * y) <= .1)
 		h = 1.0;
 	return h;
 }
@@ -150,6 +152,15 @@ int main(int argc, char** argv) {
 			system.solution->clone());
 
 	for (unsigned int t_step = 0; t_step < n_timesteps; ++t_step) {
+		std::ostringstream file_name;
+		if (t_step == 0) {
+
+			file_name << "out_" << std::setw(3) << std::setfill('0')
+					<< std::right << t_step << ".e";
+
+			ExodusII_IO(mesh).write_equation_systems(file_name.str(), es);
+		}
+
 		system.time += dt;
 
 		std::cout << "\n\n*** Solving time step " << t_step << ", time = "
@@ -398,7 +409,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				grad_p_old.add_scaled(dphi[l][qp],
 						system.old_solution(dof_ind_p[l]));
 				grad_q_old.add_scaled(dphi[l][qp],
-										system.old_solution(dof_ind_q[l]));
+						system.old_solution(dof_ind_q[l]));
 
 				// From the previous Newton iterate:
 				h += phi[l][qp] * system.current_solution(dof_ind_h[l]);
@@ -410,7 +421,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				grad_p.add_scaled(dphi[l][qp],
 						system.current_solution(dof_ind_p[l]));
 				grad_q.add_scaled(dphi[l][qp],
-										system.current_solution(dof_ind_q[l]));
+						system.current_solution(dof_ind_q[l]));
 			}
 
 			// Definitions for convenience.  It is sometimes simpler to do a
@@ -428,30 +439,30 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 			// We know that n_u_dofs == n_v_dofs so we can compute contributions
 			// for both at the same time.
 			for (unsigned int i = 0; i < n_h_dofs; i++) {
-				Fh(i) += JxW[qp] * (h_old * phi[i][qp] -    // mass-matrix term
-						 dt * (H_old * grad_h_old) * phi[i][qp] + // convection term
-						 dt * q_old * dphi[i][qp](0) - // pressure term on rhs
-						 dt * (grad_h_old * dphi[i][qp])); // diffusion term on rhs
+				Fh(i) += JxW[qp] * (h_old * phi[i][qp] +    // mass-matrix term
+						dt * p_old * dphi[i][qp](0) + // Flux x term for height term
+						dt * q_old * dphi[i][qp](0)); // Flux y term for height term
 
+				if (h_old > GEOFLOW_TINY) { // actually here hast be based on h not h_old, but here we just want to continue
 
-				Fp(i) += JxW[qp] * (p_old * phi[i][qp] -  // mass-matrix term
-						 dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
-						 dt * q_old * dphi[i][qp](1) - // pressure term on rhs
-						 dt * (grad_p_old * dphi[i][qp])) ; // diffusion term on rhs
+					Fp (i)
+					+= JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
+							dt * (p_old * p_old / h_old + .5 *k_ap* gz * h_old) * dphi[i][qp](1) +// Flux x term for momentum in x direction
+							dt * p_old * q_old / h_old * dphi[i][qp](1) +
+							dt * (gx * h_old - h_old*k_ap) phi[i][qp] );// Flux y term for momentum in x direction
 
-
-				Fq(i) += JxW[qp] * (p_old * phi[i][qp] -  // mass-matrix term
-						dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
-						dt * q_old * dphi[i][qp](1) - // pressure term on rhs
-						dt * (grad_p_old * dphi[i][qp])); // diffusion term on rhs
-
+					Fq(i) += JxW[qp] * (p_old * phi[i][qp] - // mass-matrix term
+							dt * (H_old * grad_p_old) * phi[i][qp] + // convection term
+							dt * q_old * dphi[i][qp](1) - // pressure term on rhs
+							dt * (grad_p_old * dphi[i][qp])); // diffusion term on rhs
+				}
 
 				// Note that the Fp block is identically zero unless we are using
 				// some kind of artificial compressibility scheme...
 
 				// Matrix contributions for the uu and vv couplings.
 				for (unsigned int j = 0; j < n_h_dofs; j++) {
-					Khh(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp];// mass matrix term
+					Khh(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp];	// mass matrix term
 					Khp(i, j) += 0;
 					Khq(i, j) += 0;
 
@@ -560,7 +571,7 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 
 	es.parameters.set<Real>("time") = system.time = 0;
 
-	system.project_solution(exact_value, NULL,es.parameters);
+	system.project_solution(exact_value, NULL, es.parameters);
 
 	//NumericVector<Number>& h = system.get_vector("h");
 	//NumericVector<Number>& p = system.get_vector("p");
@@ -568,8 +579,8 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 
 	//system.project_vector (h, exact_value, NULL,-1);
 
-    //p.zero();
-    //q.zero();
+	//p.zero();
+	//q.zero();
 
 	// Get a constant reference to the mesh object.
 //	const MeshBase& mesh = es.get_mesh();
