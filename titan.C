@@ -80,7 +80,7 @@ Real exact_solution(const Real x, const Real y) {
 }
 
 Number exact_value(const Point& p, const Parameters& parameters, const std::string&,
-		const std::string&) {
+    const std::string&) {
 	return exact_solution(p(0), p(1));
 }
 
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
 		system.time += dt;
 
 		std::cout << "\n\n*** Solving time step " << t_step << ", time = " << system.time << " ***"
-				<< std::endl;
+		    << std::endl;
 
 		*system.old_local_solution = *system.current_local_solution;
 
@@ -193,17 +193,17 @@ int main(int argc, char** argv) {
 
 			const Real final_linear_residual = system.final_linear_residual();
 			std::cout << "Linear solver converged at step: " << n_linear_iterations
-					<< ", final residual: " << final_linear_residual
-					<< "  Nonlinear convergence: ||u - u_old|| = " << norm_delta << std::endl;
+			    << ", final residual: " << final_linear_residual
+			    << "  Nonlinear convergence: ||u - u_old|| = " << norm_delta << std::endl;
 
 			if ((norm_delta < nonlinear_tolerance)
-					&& (system.final_linear_residual() < nonlinear_tolerance)) {
+			    && (system.final_linear_residual() < nonlinear_tolerance)) {
 				std::cout << " Nonlinear solver converged at step " << l << std::endl;
 				break;
 			}
 
 			es.parameters.set<Real>("linear solver tolerance") = std::min(
-					Utility::pow<2>(final_linear_residual), initial_linear_solver_tol);
+			    Utility::pow<2>(final_linear_residual), initial_linear_solver_tol);
 
 		} // end nonlinear loop
 
@@ -248,13 +248,18 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// Build a Finite Element object of the specified type for
 	// the velocity variables.
 	AutoPtr<FEBase> fe_h(FEBase::build(dim, fe_h_type));
+	AutoPtr<FEBase> fe_elem_face(FEBase::build(dim, fe_h_type));
+	AutoPtr<FEBase> fe_neighbor_face(FEBase::build(dim, fe_h_type));
 
 	// A Gauss quadrature rule for numerical integration.
 	// Let the \p FEType object decide what order rule is appropriate.
 	QGauss qrule(dim, fe_h_type.default_quadrature_order());
+	QGauss qface(dim - 1, fe_h_type.default_quadrature_order());
 
 	// Tell the finite element objects to use our quadrature rule.
 	fe_h->attach_quadrature_rule(&qrule);
+  fe_elem_face->attach_quadrature_rule(&qface);
+  fe_neighbor_face->attach_quadrature_rule(&qface);
 
 	// Here we define some references to cell-specific data that
 	// will be used to assemble the linear system.
@@ -268,6 +273,17 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// The element shape function gradients for the velocity
 	// variables evaluated at the quadrature points.
 	const std::vector<std::vector<RealGradient> >& dphi = fe_h->get_dphi();
+
+	// This part is related to face integrations
+  const std::vector<std::vector<Real> >&  phi_face = fe_elem_face->get_phi();
+  const std::vector<std::vector<RealGradient> >& dphi_face = fe_elem_face->get_dphi();
+  const std::vector<Real>& JxW_face = fe_elem_face->get_JxW();
+  const std::vector<Point>& qface_normals = fe_elem_face->get_normals();
+  const std::vector<Point>& qface_points = fe_elem_face->get_xyz();
+
+  // This part is related to face integrations
+  const std::vector<std::vector<Real> >&  phi_neighbor_face = fe_neighbor_face->get_phi();
+  const std::vector<std::vector<RealGradient> >& dphi_neighbor_face = fe_neighbor_face->get_dphi();
 
 	// A reference to the \p DofMap object for this system.  The \p DofMap
 	// object handles the index translation from node and element numbers
@@ -283,7 +299,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	DenseVector<Number> Fe;
 
 	DenseSubMatrix<Number> Khh(Ke), Khp(Ke), Khq(Ke), Kph(Ke), Kpp(Ke), Kpq(Ke), Kqh(Ke), Kqp(Ke),
-			Kqq(Ke);
+	    Kqq(Ke);
 
 	DenseSubVector<Number> Fh(Fe), Fp(Fe), Fq(Fe);
 
@@ -435,8 +451,8 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 			// for both at the same time.
 			for (unsigned int i = 0; i < n_h_dofs; i++) {
 				Fh(i) += JxW[qp] * (h_old * phi[i][qp] +    // mass-matrix term
-						dt * p_old * dphi[i][qp](0) + // Flux x term for height term
-						dt * q_old * dphi[i][qp](0)); // Flux y term for height term
+				    dt * p_old * dphi[i][qp](0) + // Flux x term for height term
+				    dt * q_old * dphi[i][qp](0)); // Flux y term for height term
 
 				if (h_old > GEOFLOW_TINY) { // actually here hast be based on h not h_old, but here we just want to continue
 
@@ -473,18 +489,18 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 					const Number sy3 = vy / vel * tan(bedfric) * (gz * h_old + h_old * vy * invcurve);
 
 					Fp(i) += JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
-							dt * (p_old * vx + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux x term for momentum in x direction
-							dt * p_old * vy * dphi[i][qp](1) + // Flux y term for momentum in x direction
-							dt * (sx1 - sx2 - sx3) * phi[i][qp]);
+					    dt * (p_old * vx + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux x term for momentum in x direction
+					    dt * p_old * vy * dphi[i][qp](1) + // Flux y term for momentum in x direction
+					    dt * (sx1 - sx2 - sx3) * phi[i][qp]);
 
 					Fq(i) += JxW[qp] * (q_old * phi[i][qp] +  // mass-matrix term
-							dt * q_old * vx * dphi[i][qp](1) + // Flux x term for momentum in y direction
-							dt * (q_old * vy + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux y term for momentum in y direction
-							dt * (sy1 - sy2 - sy3) * phi[i][qp]);
+					    dt * q_old * vx * dphi[i][qp](1) + // Flux x term for momentum in y direction
+					    dt * (q_old * vy + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux y term for momentum in y direction
+					    dt * (sy1 - sy2 - sy3) * phi[i][qp]);
 
 					if (isnan(Fh(i)) || isnan(Fp(i)) || isnan(Fq(i)))
 						std::cout << "here something is wrong  " << Fh(i) << "  , " << Fp(i) << "  ,  " << Fq(i)
-								<< std::endl;
+						    << std::endl;
 
 				} else {
 
@@ -650,10 +666,10 @@ Number compute_kap(Number vx_x, Number vy_y, Number bedfric, Number intfric) {
 	} else {
 
 		kap = 2.
-				* (1.
-						- passive
-								* sqrt(fabs(1. - cos(intfric) * cos(intfric) * (1. + tan(bedfric) * tan(bedfric)))))
-				/ (cos(intfric) * cos(intfric)) - 1.;
+		    * (1.
+		        - passive
+		            * sqrt(fabs(1. - cos(intfric) * cos(intfric) * (1. + tan(bedfric) * tan(bedfric)))))
+		    / (cos(intfric) * cos(intfric)) - 1.;
 		return kap;
 	}
 
