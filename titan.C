@@ -62,6 +62,10 @@
 
 #include "libmesh/utility.h"
 
+//#include "libmesh/function_base.h"
+//#include "libmesh/libmesh_common.h"
+//#include "libmesh/exact_solution.h"
+
 const double GEOFLOW_TINY = 0.0001;
 
 // Bring in everything from the libMesh namespace
@@ -71,16 +75,16 @@ void assemble_sw(EquationSystems& es, const std::string& system_name);
 
 void init_cd(EquationSystems& es, const std::string& system_name);
 
-Real exact_solution(const Real x, const Real y) {
+std::vector<Number> exact_solution(const Real x, const Real y) {
 
-	Real h = 0.;
+	//Real h = 0.;
+	std::vector<Number> state(3, 0.0);
 	if ((x * x + y * y) <= .1)
-		h = 1.0;
-	return h;
+		state[0] = 1.0;
+	return state;
 }
 
-Number exact_value(const Point& p, const Parameters& parameters, const std::string&,
-    const std::string&) {
+std::vector<Number> exact_value(const Point& p, const std::string&, const std::string&) {
 	return exact_solution(p(0), p(1));
 }
 
@@ -258,8 +262,8 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 
 	// Tell the finite element objects to use our quadrature rule.
 	fe_h->attach_quadrature_rule(&qrule);
-  fe_elem_face->attach_quadrature_rule(&qface);
-  fe_neighbor_face->attach_quadrature_rule(&qface);
+	fe_elem_face->attach_quadrature_rule(&qface);
+	fe_neighbor_face->attach_quadrature_rule(&qface);
 
 	// Here we define some references to cell-specific data that
 	// will be used to assemble the linear system.
@@ -275,15 +279,15 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	const std::vector<std::vector<RealGradient> >& dphi = fe_h->get_dphi();
 
 	// This part is related to face integrations
-  const std::vector<std::vector<Real> >&  phi_face = fe_elem_face->get_phi();
-  const std::vector<std::vector<RealGradient> >& dphi_face = fe_elem_face->get_dphi();
-  const std::vector<Real>& JxW_face = fe_elem_face->get_JxW();
-  const std::vector<Point>& qface_normals = fe_elem_face->get_normals();
-  const std::vector<Point>& qface_points = fe_elem_face->get_xyz();
+	const std::vector<std::vector<Real> >& phi_face = fe_elem_face->get_phi();
+	const std::vector<std::vector<RealGradient> >& dphi_face = fe_elem_face->get_dphi();
+	const std::vector<Real>& JxW_face = fe_elem_face->get_JxW();
+	const std::vector<Point>& qface_normals = fe_elem_face->get_normals();
+	const std::vector<Point>& qface_points = fe_elem_face->get_xyz();
 
-  // This part is related to face integrations
-  const std::vector<std::vector<Real> >&  phi_neighbor_face = fe_neighbor_face->get_phi();
-  const std::vector<std::vector<RealGradient> >& dphi_neighbor_face = fe_neighbor_face->get_dphi();
+	// This part is related to face integrations
+	const std::vector<std::vector<Real> >& phi_neighbor_face = fe_neighbor_face->get_phi();
+	const std::vector<std::vector<RealGradient> >& dphi_neighbor_face = fe_neighbor_face->get_dphi();
 
 	// A reference to the \p DofMap object for this system.  The \p DofMap
 	// object handles the index translation from node and element numbers
@@ -613,6 +617,73 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// That's it.
 	return;
 }
+class SWExactSolution {
+public:
+	SWExactSolution() {
+	}
+
+	~SWExactSolution() {
+	}
+
+	Real operator()(unsigned int component, Real x, Real y) {
+		switch (component) {
+			case 0:
+				if ((x*x+y*y)<.1)
+					return 1.;
+				return 0.;
+
+			case 1:
+				return 0.;
+
+			case 2:
+				return 0.;
+
+			default:
+				libmesh_error_msg("Invalid component = " << component);
+		}
+	}
+};
+class SolutionFunction: public FunctionBase<Number> {
+public:
+
+	SolutionFunction(const unsigned int state_var) :
+			_state_var(state_var) {
+	}
+	~SolutionFunction() {
+	}
+
+	virtual Number operator()(const Point&, const Real = 0) {
+		libmesh_not_implemented();}
+
+		virtual void operator() (const Point& p,
+				const Real,
+				DenseVector<Number>& output)
+		{
+			output.zero();
+			const Real x=p(0), y=p(1);
+			// libMesh assumes each component of the vector-valued variable is stored
+			// contiguously.
+			output(_state_var) = soln( 0, x, y );
+			output(_state_var+1) = soln( 1, x, y );
+			output(_state_var+2) = soln( 2, x, y );
+		}
+
+		virtual Number component( unsigned int component_in, const Point& p,
+				const Real )
+		{
+			const Real x=p(0), y=p(1);
+			return soln( component_in, x, y );
+		}
+
+		virtual AutoPtr<FunctionBase<Number> > clone() const
+		  { return AutoPtr<FunctionBase<Number> > (new SolutionFunction(_state_var)); }
+
+	private:
+
+		const unsigned int _state_var;
+		SWExactSolution soln;
+	};
+
 
 void init_cd(EquationSystems& es, const std::string& system_name) {
 
@@ -623,32 +694,10 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 
 	es.parameters.set<Real>("time") = system.time = 0;
 
-	system.project_solution(exact_value, NULL, es.parameters);
+	SolutionFunction func(1);
 
-	//NumericVector<Number>& h = system.get_vector("h");
-	//NumericVector<Number>& p = system.get_vector("p");
-	//NumericVector<Number>& q = system.get_vector("q");
+	system.project_solution(&func, NULL);
 
-	//system.project_vector (h, exact_value, NULL,-1);
-
-	//p.zero();
-	//q.zero();
-
-	// Get a constant reference to the mesh object.
-//	const MeshBase& mesh = es.get_mesh();
-
-//	MeshBase::const_element_iterator el = mesh.active_local_elements_begin();
-//	const MeshBase::const_element_iterator end_el =
-//			mesh.active_local_elements_end();
-
-//	MeshBase::const_node_iterator node_it = mesh.nodes_begin();
-//	const MeshBase::const_node_iterator node_end = mesh.nodes_end();
-//
-//	for (; node_it != node_end; ++node_it) {
-//
-//		const Node* node = *node_it;
-//
-//	}
 
 	return;
 }
