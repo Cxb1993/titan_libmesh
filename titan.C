@@ -75,18 +75,18 @@ void assemble_sw(EquationSystems& es, const std::string& system_name);
 
 void init_cd(EquationSystems& es, const std::string& system_name);
 
-std::vector<Number> exact_solution(const Real x, const Real y) {
-
-	//Real h = 0.;
-	std::vector<Number> state(3, 0.0);
-	if ((x * x + y * y) <= .1)
-		state[0] = 1.0;
-	return state;
-}
-
-std::vector<Number> exact_value(const Point& p, const std::string&, const std::string&) {
-	return exact_solution(p(0), p(1));
-}
+//std::vector<Number> exact_solution(const Real x, const Real y) {
+//
+//	//Real h = 0.;
+//	std::vector<Number> state(3, 0.0);
+//	if ((x * x + y * y) <= .1)
+//		state[0] = 1.0;
+//	return state;
+//}
+//
+//std::vector<Number> exact_value(const Point& p, const std::string&, const std::string&) {
+//	return exact_solution(p(0), p(1));
+//}
 
 template<typename T> inline T sign(T t) {
 	return (t < -1) ? -1 : 1;
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 //	std::string mesh_file = argv[1];//first input is the binary name
 //
 //	mesh.read (argv[1]);
-	MeshTools::Generation::build_square(mesh, 19, 19, -1., 1., -1., 1., QUAD9);
+	MeshTools::Generation::build_square(mesh, 15, 15, -1., 1., -1., 1., QUAD9);
 
 //	this is for writing mesh
 //	mesh.write (argv[2]);
@@ -465,46 +465,49 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 					const Number h_inv = 1 / h_old;
 					const Number vel = sqrt(vx * vx + vy * vy);
 
-					const Number gx = 0.; // this has to be corrected later
-					const Number gy = 0.; // this has to be corrected later
-					const Number gz = -9.8; // this has to be corrected later
+					if (vel > 0.) {
 
-					const Number g_x = 0.; // this has to be corrected later
-					const Number g_y = 0.; // this has to be corrected later
-					//const Number g_z = 0.; // this has to be corrected later
+						const Number gx = 0.; // this has to be corrected later
+						const Number gy = 0.; // this has to be corrected later
+						const Number gz = -9.8; // this has to be corrected later
 
-					const Number vx_x = h_inv * (p_x - vx * h_x);
-					const Number vx_y = h_inv * (p_y - vx * h_y);
+						const Number g_x = 0.; // this has to be corrected later
+						const Number g_y = 0.; // this has to be corrected later
+						//const Number g_z = 0.; // this has to be corrected later
 
-					const Number vy_x = h_inv * (q_x - vy * h_x);
-					const Number vy_y = h_inv * (q_y - vy * h_y);
+						const Number vx_x = h_inv * (p_x - vx * h_x);
+						const Number vx_y = h_inv * (p_y - vx * h_y);
 
-					const Number k_ap = compute_kap(vx_x, vy_y, bedfric, intfric);
-					const Number invcurve = 0.; // this has to be corrected later
+						const Number vy_x = h_inv * (q_x - vy * h_x);
+						const Number vy_y = h_inv * (q_y - vy * h_y);
 
-					// x source terms
-					const Number sx1 = gx * h_old; // hydrostatic pressure
-					const Number sx2 = h_old * k_ap * sign(vx_y) * g_y * h_y * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
-					const Number sx3 = vx / vel * tan(bedfric) * (gz * h_old + h_old * vx * invcurve);
+						const Number k_ap = compute_kap(vx_x, vy_y, bedfric, intfric);
+						const Number invcurve = 0.; // this has to be corrected later
 
-					// y source terms
-					const Number sy1 = gy * h_old; // hydrostatic pressure
-					const Number sy2 = h_old * k_ap * sign(vy_x) * g_x * h_x * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
-					const Number sy3 = vy / vel * tan(bedfric) * (gz * h_old + h_old * vy * invcurve);
+						// x source terms
+						const Number sx1 = gx * h_old; // hydrostatic pressure
+						const Number sx2 = h_old * k_ap * sign(vx_y) * g_y * h_y * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
+						const Number sx3 = vx / vel * tan(bedfric) * (gz * h_old + h_old * vx * invcurve);
 
-					Fp(i) += JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
-					    dt * (p_old * vx + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux x term for momentum in x direction
-					    dt * p_old * vy * dphi[i][qp](1) + // Flux y term for momentum in x direction
-					    dt * (sx1 - sx2 - sx3) * phi[i][qp]);
+						// y source terms
+						const Number sy1 = gy * h_old; // hydrostatic pressure
+						const Number sy2 = h_old * k_ap * sign(vy_x) * g_x * h_x * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
+						const Number sy3 = vy / vel * tan(bedfric) * (gz * h_old + h_old * vy * invcurve);
 
-					Fq(i) += JxW[qp] * (q_old * phi[i][qp] +  // mass-matrix term
-					    dt * q_old * vx * dphi[i][qp](1) + // Flux x term for momentum in y direction
-					    dt * (q_old * vy + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux y term for momentum in y direction
-					    dt * (sy1 - sy2 - sy3) * phi[i][qp]);
+						Fp(i) += JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
+						    dt * (p_old * vx + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux x term for momentum in x direction
+						    dt * p_old * vy * dphi[i][qp](1) + // Flux y term for momentum in x direction
+						    dt * (sx1 - sx2 - sx3) * phi[i][qp]);
 
-					if (isnan(Fh(i)) || isnan(Fp(i)) || isnan(Fq(i)))
-						std::cout << "here something is wrong  " << Fh(i) << "  , " << Fp(i) << "  ,  " << Fq(i)
-						    << std::endl;
+						Fq(i) += JxW[qp] * (q_old * phi[i][qp] +  // mass-matrix term
+						    dt * q_old * vx * dphi[i][qp](1) + // Flux x term for momentum in y direction
+						    dt * (q_old * vy + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux y term for momentum in y direction
+						    dt * (sy1 - sy2 - sy3) * phi[i][qp]);
+
+						if (isnan(Fh(i)) || isnan(Fp(i)) || isnan(Fq(i)))
+							std::cout << "here something is wrong  " << Fh(i) << "  , " << Fp(i) << "  ,  "
+							    << Fq(i) << std::endl;
+					}
 
 				} else {
 
@@ -628,7 +631,7 @@ public:
 	Real operator()(unsigned int component, Real x, Real y) {
 		switch (component) {
 			case 0:
-				if ((x*x+y*y)<.1)
+				if ((x * x + y * y) < .1)
 					return 1.;
 				return 0.;
 
@@ -676,14 +679,13 @@ public:
 		}
 
 		virtual AutoPtr<FunctionBase<Number> > clone() const
-		  { return AutoPtr<FunctionBase<Number> > (new SolutionFunction(_state_var)); }
+		{	return AutoPtr<FunctionBase<Number> > (new SolutionFunction(_state_var));}
 
 	private:
 
 		const unsigned int _state_var;
 		SWExactSolution soln;
 	};
-
 
 void init_cd(EquationSystems& es, const std::string& system_name) {
 
@@ -697,7 +699,6 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 	SolutionFunction func(1);
 
 	system.project_solution(&func, NULL);
-
 
 	return;
 }
