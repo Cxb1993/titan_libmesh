@@ -16,4 +16,5 @@ mesh/generation/origin = '0.0 0.0'
 mesh/generation/size = '1.5 1.5'
 duration = 1.0
 output/frequency = 1
+order=2
 results_directory = ./

@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 //	std::string mesh_file = argv[1];//first input is the binary name
 //
 //	mesh.read (argv[1]);
-	MeshTools::Generation::build_square(mesh, 15, 15, -1., 1., -1., 1., QUAD9);
+	MeshTools::Generation::build_square(mesh, 5, 5, -1., 1., -1., 1., QUAD9);
 
 //	this is for writing mesh
 //	mesh.write (argv[2]);
@@ -126,13 +126,14 @@ int main(int argc, char** argv) {
 //	es.add_system<FEMSystem>("SW");
 	TransientLinearImplicitSystem& system = es.add_system<TransientLinearImplicitSystem>("SW");
 
+	Order order = static_cast<Order>(args("order", 1));
 //	first we just create height
 //	unsigned int h_var = es.get_system("SW").add_variable("h", SECOND);
-	es.get_system("SW").add_variable("h", FIRST);
+	es.get_system("SW").add_variable("h", order, MONOMIAL);
 //		first momentum
-	es.get_system("SW").add_variable("p", FIRST);
+	es.get_system("SW").add_variable("p", order, MONOMIAL);
 //		second momentum
-	es.get_system("SW").add_variable("q", FIRST);
+	es.get_system("SW").add_variable("q", order, MONOMIAL);
 
 	es.get_system("SW").attach_assemble_function(assemble_sw);
 	es.get_system("SW").attach_init_function(init_cd);
@@ -632,7 +633,7 @@ public:
 		switch (component) {
 			case 0:
 				if ((x * x + y * y) < .1)
-					return 1.;
+					return .1 - (x * x + y * y);
 				return 0.;
 
 			case 1:
