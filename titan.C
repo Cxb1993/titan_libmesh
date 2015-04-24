@@ -299,14 +299,15 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	// Define data structures to contain the element matrix
 	// and right-hand-side vector contribution.  Following
 	// basic finite element terminology we will denote these
-	// "Ke" and "Fe".
-	DenseMatrix<Number> Ke;
-	DenseVector<Number> Fe;
 
-	DenseSubMatrix<Number> Khh(Ke), Khp(Ke), Khq(Ke), Kph(Ke), Kpp(Ke), Kpq(Ke), Kqh(Ke), Kqp(Ke),
-	    Kqq(Ke);
+	// Mass matrix of each element
+	DenseMatrix<Number> Mhe, Mpe, Mqe;
 
-	DenseSubVector<Number> Fh(Fe), Fp(Fe), Fq(Fe);
+	// solution vector of each element
+	DenseVector<Number> Fhe, Fpe, Fqe, solhe, solpe, solqe;
+
+	// current solution vector of all local element
+	//DenseVector<Number> Fh, Fp, Fq;
 
 	// This vector will hold the degree of freedom indices for
 	// the element.  These define where in the global system
@@ -352,12 +353,12 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// current element.  These define where in the global
 		// matrix and right-hand-side this element will
 		// contribute to.
-		dof_map.dof_indices(elem, dof_ind);
+
 		dof_map.dof_indices(elem, dof_ind_h, h_var);
 		dof_map.dof_indices(elem, dof_ind_p, p_var);
 		dof_map.dof_indices(elem, dof_ind_q, q_var);
 
-		const unsigned int n_dofs = dof_ind.size();
+
 		const unsigned int n_h_dofs = dof_ind_h.size();
 		const unsigned int n_p_dofs = dof_ind_p.size();
 		const unsigned int n_q_dofs = dof_ind_q.size();
@@ -368,47 +369,67 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		// (phi, dphi) for the current element.
 		fe_h->reinit(elem);
 
-		// Zero the element matrix and right-hand side before
-		// summing them.  We use the resize member here because
-		// the number of degrees of freedom might have changed from
-		// the last element.  Note that this will be the case if the
-		// element type is different (i.e. the last element was a
-		// triangle, now we are on a quadrilateral).
-		Ke.resize(n_dofs, n_dofs);
-		Fe.resize(n_dofs);
+		Mhe.resize(n_h_dofs, n_h_dofs);
+		Mpe.resize(n_p_dofs, n_p_dofs);
+		Mqe.resize(n_q_dofs, n_q_dofs);
 
-		// Reposition the submatrices...  The idea is this:
-		//
-		//         -           -          -  -
-		//        | Khh  Khmx  Khmy  |        | Fh  |
-		//   Ke = | Kmxh Kmxmx Kmxmy |;  Fe = | Fmx |
-		//        | Kmyh Kmymx Kmymy |        | Fmy |
-		//         -           -          -  -
-		//
-		// The \p DenseSubMatrix.repostition () member takes the
-		// (row_offset, column_offset, row_size, column_size).
-		//
-		// Similarly, the \p DenseSubVector.reposition () member
-		// takes the (row_offset, row_size)
-		Khh.reposition(h_var * n_h_dofs, h_var * n_h_dofs, n_h_dofs, n_h_dofs);
-		Khp.reposition(h_var * n_h_dofs, p_var * n_h_dofs, n_h_dofs, n_p_dofs);
-		Khq.reposition(h_var * n_h_dofs, q_var * n_h_dofs, n_h_dofs, n_q_dofs);
+		Fhe.resize(n_h_dofs);
+		Fpe.resize(n_p_dofs);
+		Fqe.resize(n_q_dofs);
 
-		Kph.reposition(p_var * n_p_dofs, h_var * n_p_dofs, n_p_dofs, n_h_dofs);
-		Kpp.reposition(p_var * n_p_dofs, p_var * n_p_dofs, n_p_dofs, n_p_dofs);
-		Kpq.reposition(p_var * n_p_dofs, q_var * n_p_dofs, n_p_dofs, n_q_dofs);
-
-		Kqh.reposition(q_var * n_h_dofs, h_var * n_h_dofs, n_q_dofs, n_h_dofs);
-		Kqp.reposition(q_var * n_h_dofs, p_var * n_h_dofs, n_q_dofs, n_p_dofs);
-		Kqq.reposition(q_var * n_h_dofs, q_var * n_h_dofs, n_q_dofs, n_q_dofs);
-
-		Fh.reposition(h_var * n_h_dofs, n_h_dofs);
-		Fp.reposition(p_var * n_h_dofs, n_p_dofs);
-		Fq.reposition(q_var * n_h_dofs, n_q_dofs);
+		solhe.resize(n_h_dofs);
+		solpe.resize(n_p_dofs);
+		solqe.resize(n_q_dofs);
 
 //		perf_log.pop("elem_init");
 
 		// Now we will build the element matrix.
+		for (unsigned int qp = 0; qp < qrule.n_points(); qp++) {
+
+			// Values to hold the solution & its gradient at the previous timestep.
+			Number h_old = 0.;
+			Number p_old = 0.;
+			Number q_old = 0.;
+
+			// Compute h and momentums from the previous timestep
+			// and the old Newton iterate.
+			for (unsigned int l = 0; l < n_h_dofs; l++) {
+				// From the old timestep:
+				h_old += phi[l][qp] * system.old_solution(dof_ind_h[l]);
+				p_old += phi[l][qp] * system.old_solution(dof_ind_p[l]);
+				q_old += phi[l][qp] * system.old_solution(dof_ind_q[l]);
+			}
+
+			// First, an i-loop over the velocity degrees of freedom.
+			// We know that n_u_dofs == n_v_dofs so we can compute contributions
+			// for both at the same time.
+			for (unsigned int i = 0; i < n_h_dofs; i++) {
+				Fhe(i) += JxW[qp] * (h_old * phi[i][qp] +    // mass-matrix term
+				    dt * p_old * dphi[i][qp](0) + // Flux x term for height term
+				    dt * q_old * dphi[i][qp](0)); // Flux y term for height term
+
+				for (unsigned int j = 0; j < n_h_dofs; j++)
+					Mhe(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp];	// mass matrix term
+
+			}
+		}
+
+		Mhe.lu_solve(Fhe, solhe);
+		Number h_ave = 0.;
+		for (unsigned int qp = 0; qp < qrule.n_points(); qp++) {
+
+			// Values to hold the solution & its gradient at the previous timestep.
+			Number h_old = 0.;
+
+			for (unsigned int l = 0; l < n_h_dofs; l++)
+				// From the old timestep:
+				h_old += phi[l][qp] * solhe(l);
+
+			h_ave += JxW[qp] * h_old;
+		}
+
+		h_ave /= elem->volume();
+
 		for (unsigned int qp = 0; qp < qrule.n_points(); qp++) {
 
 			// Values to hold the solution & its gradient at the previous timestep.
@@ -429,15 +450,6 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				grad_h_old.add_scaled(dphi[l][qp], system.old_solution(dof_ind_h[l]));
 				grad_p_old.add_scaled(dphi[l][qp], system.old_solution(dof_ind_p[l]));
 				grad_q_old.add_scaled(dphi[l][qp], system.old_solution(dof_ind_q[l]));
-
-				// From the previous Newton iterate:
-				h += phi[l][qp] * system.current_solution(dof_ind_h[l]);
-				p += phi[l][qp] * system.current_solution(dof_ind_p[l]);
-				q += phi[l][qp] * system.current_solution(dof_ind_q[l]);
-
-				grad_h.add_scaled(dphi[l][qp], system.current_solution(dof_ind_h[l]));
-				grad_p.add_scaled(dphi[l][qp], system.current_solution(dof_ind_p[l]));
-				grad_q.add_scaled(dphi[l][qp], system.current_solution(dof_ind_q[l]));
 			}
 
 			// Definitions for convenience.  It is sometimes simpler to do a
@@ -451,15 +463,9 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 			const Number q_x = grad_q_old(0);
 			const Number q_y = grad_q_old(1);
 
-			// First, an i-loop over the velocity degrees of freedom.
-			// We know that n_u_dofs == n_v_dofs so we can compute contributions
-			// for both at the same time.
 			for (unsigned int i = 0; i < n_h_dofs; i++) {
-				Fh(i) += JxW[qp] * (h_old * phi[i][qp] +    // mass-matrix term
-				    dt * p_old * dphi[i][qp](0) + // Flux x term for height term
-				    dt * q_old * dphi[i][qp](0)); // Flux y term for height term
 
-				if (h_old > GEOFLOW_TINY) { // actually here hast be based on h not h_old, but here we just want to continue
+				if (h_ave > GEOFLOW_TINY) { // actually here hast be based on h not h_old, but here we just want to continue
 
 					const Number vx = p_old / h_old;
 					const Number vy = q_old / h_old;
@@ -495,26 +501,26 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 						const Number sy2 = h_old * k_ap * sign(vy_x) * g_x * h_x * sin(intfric); // internal friction source term (this part has to be corrected currently I assumed gz is constant)
 						const Number sy3 = vy / vel * tan(bedfric) * (gz * h_old + h_old * vy * invcurve);
 
-						Fp(i) += JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
+						Fpe(i) += JxW[qp] * (p_old * phi[i][qp] +  // mass-matrix term
 						    dt * (p_old * vx + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux x term for momentum in x direction
 						    dt * p_old * vy * dphi[i][qp](1) + // Flux y term for momentum in x direction
 						    dt * (sx1 - sx2 - sx3) * phi[i][qp]);
 
-						Fq(i) += JxW[qp] * (q_old * phi[i][qp] +  // mass-matrix term
+						Fqe(i) += JxW[qp] * (q_old * phi[i][qp] +  // mass-matrix term
 						    dt * q_old * vx * dphi[i][qp](1) + // Flux x term for momentum in y direction
 						    dt * (q_old * vy + .5 * k_ap * gz * h_old * h_old) * dphi[i][qp](1) + // Flux y term for momentum in y direction
 						    dt * (sy1 - sy2 - sy3) * phi[i][qp]);
 
-						if (isnan(Fh(i)) || isnan(Fp(i)) || isnan(Fq(i)))
-							std::cout << "here something is wrong  " << Fh(i) << "  , " << Fp(i) << "  ,  "
-							    << Fq(i) << std::endl;
+						if (isnan(Fhe(i)) || isnan(Fpe(i)) || isnan(Fqe(i)))
+							std::cout << "here something is wrong  " << Fhe(i) << "  , " << Fpe(i) << "  ,  "
+							    << Fqe(i) << std::endl;
 					}
 
 				} else {
 
-					Fp(i) += JxW[qp] * p_old * phi[i][qp];
+					Fpe(i) += JxW[qp] * p_old * phi[i][qp];
 
-					Fq(i) += JxW[qp] * q_old * phi[i][qp];
+					Fqe(i) += JxW[qp] * q_old * phi[i][qp];
 
 				}
 
@@ -523,99 +529,17 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 
 				// Matrix contributions for the uu and vv couplings.
 				for (unsigned int j = 0; j < n_h_dofs; j++) {
-					Khh(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp];	// mass matrix term
-					Khp(i, j) += 0;
-					Khq(i, j) += 0;
 
-					Kph(i, j) += 0;
-					Kpp(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp]; // mass matrix term;
-					Kpq(i, j) += 0;
-
-					Kqh(i, j) += 0;
-					Kqp(i, j) += 0;
-					Kqq(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp]; // mass matrix term
+					Mpe(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp]; // mass matrix term;
+					Mqe(i, j) += JxW[qp] * phi[i][qp] * phi[j][qp]; // mass matrix term
 				}
 			}
 
 		} // end of the quadrature point qp-loop
 
-		// At this point the interior element integration has
-		// been completed.  However, we have not yet addressed
-		// boundary conditions.  For this example we will only
-		// consider simple Dirichlet boundary conditions imposed
-		// via the penalty method. The penalty method used here
-		// is equivalent (for Lagrange basis functions) to lumping
-		// the matrix resulting from the L2 projection penalty
-		// approach introduced in example 3.
-//		{
-//			// The penalty value.  \f$ \frac{1}{\epsilon} \f$
-//			const Real penalty = 1.e10;
-//
-//			// The following loops over the sides of the element.
-//			// If the element has no neighbor on a side then that
-//			// side MUST live on a boundary of the domain.
-//			for (unsigned int s = 0; s < elem->n_sides(); s++)
-//				if (elem->neighbor(s) == NULL) {
-//					AutoPtr<Elem> side(elem->build_side(s));
-//
-//					// Loop over the nodes on the side.
-//					for (unsigned int ns = 0; ns < side->n_nodes(); ns++) {
-//						// Boundary ids are set internally by
-//						// build_square().
-//						// 0=bottom
-//						// 1=right
-//						// 2=top
-//						// 3=left
-//
-//						// Set u = 1 on the top boundary, 0 everywhere else
-//						const Real h_value =
-//								(mesh.get_boundary_info().has_boundary_id(elem,
-//										s, 2)) ? 1. : 0.;
-//
-//						// Set v = 0 everywhere
-//						const Real mx_value = 0.;
-//
-//						// Find the node on the element matching this node on
-//						// the side.  That defined where in the element matrix
-//						// the boundary condition will be applied.
-//						for (unsigned int n = 0; n < elem->n_nodes(); n++)
-//							if (elem->node(n) == side->node(ns)) {
-//								// Matrix contribution.
-//								Khh(n, n) += penalty;
-//								Kpp(n, n) += penalty;
-//
-//								// Right-hand-side contribution.
-//								Fh(n) += penalty * h_value;
-//								Fp(n) += penalty * mx_value;
-//							}
-//					} // end face node loop
-//				} // end if (elem->neighbor(side) == NULL)
-//
-//			// Pin the pressure to zero at global node number "pressure_node".
-//			// This effectively removes the non-trivial null space of constant
-//			// pressure solutions.
-//			const bool pin_pressure = true;
-//			if (pin_pressure) {
-//				const unsigned int pressure_node = 0;
-//				const Real my_value = 0.0;
-//				for (unsigned int c = 0; c < elem->n_nodes(); c++)
-//					if (elem->node(c) == pressure_node) {
-//						Kqq(c, c) += penalty;
-//						Fq(c) += penalty * my_value;
-//					}
-//			}
-//		} // end boundary condition section
+		Mpe.lu_solve(Fpe, solpe);
+		Mqe.lu_solve(Fqe, solqe);
 
-		// If this assembly program were to be used on an adaptive mesh,
-		// we would have to apply any hanging node constraint equations.
-		dof_map.constrain_element_matrix_and_vector(Ke, Fe, dof_ind);
-
-		// The element matrix and right-hand-side are now built
-		// for this element.  Add them to the global matrix and
-		// right-hand-side vector.  The \p NumericMatrix::add_matrix()
-		// and \p NumericVector::add_vector() members do this for us.
-		system.matrix->add_matrix(Ke, dof_ind);
-		system.rhs->add_vector(Fe, dof_ind);
 	} // end of element loop
 
 	// That's it.
