@@ -25,8 +25,9 @@
 #include "libmesh/equation_systems.h"
 // Include files that define a simple steady system
 //#include "libmesh/fem_system.h"
-#include "libmesh/linear_implicit_system.h"
+//#include "libmesh/linear_implicit_system.h"
 #include "libmesh/transient_system.h"
+#include "libmesh/explicit_system.h"
 // for reading input parameters from file
 #include "libmesh/getpot.h"
 
@@ -62,10 +63,6 @@
 
 #include "libmesh/utility.h"
 
-//#include "libmesh/function_base.h"
-//#include "libmesh/libmesh_common.h"
-//#include "libmesh/exact_solution.h"
-
 const double GEOFLOW_TINY = 0.0001;
 
 // Bring in everything from the libMesh namespace
@@ -74,19 +71,6 @@ using namespace libMesh;
 void assemble_sw(EquationSystems& es, const std::string& system_name);
 
 void init_cd(EquationSystems& es, const std::string& system_name);
-
-//std::vector<Number> exact_solution(const Real x, const Real y) {
-//
-//	//Real h = 0.;
-//	std::vector<Number> state(3, 0.0);
-//	if ((x * x + y * y) <= .1)
-//		state[0] = 1.0;
-//	return state;
-//}
-//
-//std::vector<Number> exact_value(const Point& p, const std::string&, const std::string&) {
-//	return exact_solution(p(0), p(1));
-//}
 
 template<typename T> inline T sign(T t) {
 	return (t < -1) ? -1 : 1;
@@ -111,9 +95,6 @@ int main(int argc, char** argv) {
 //	we will have only one systems of equations
 	EquationSystems es(mesh);
 
-//	this shows how we can set the parameters
-	es.parameters.set<Real>("dummy") = 42.;
-
 	// read simulation parameters from file
 	GetPot args = GetPot("simulation.data");
 	double bed_fric = args("material/friction/bed", 35.0);
@@ -124,7 +105,7 @@ int main(int argc, char** argv) {
 
 //	the only system of equation we have
 //	es.add_system<FEMSystem>("SW");
-	TransientLinearImplicitSystem& system = es.add_system<TransientLinearImplicitSystem>("SW");
+	TransientExplicitSystem& system = es.add_system<TransientExplicitSystem>("SW");
 
 	Order order = static_cast<Order>(args("order", 1));
 //	first we just create height
@@ -149,21 +130,15 @@ int main(int argc, char** argv) {
 
 	PerfLog perf_log("Transient Logger");
 
-	es.parameters.set<unsigned int>("linear solver maximum iterations") = 250;
-	es.parameters.set<Real>("linear solver tolerance") = TOLERANCE;
-
 	const Real dt = 0.0001;
 	system.time = 0.0;
-	const unsigned int n_timesteps = 150;
 
-	const unsigned int n_nonlinear_steps = 20;
-	const Real nonlinear_tolerance = 1.e-3;
+	const unsigned int n_timesteps = 150;
 
 	es.parameters.set<Real>("dt") = dt;
 
-	AutoPtr<NumericVector<Number> > last_nonlinear_soln(system.solution->clone());
-
 	for (unsigned int t_step = 0; t_step < n_timesteps; ++t_step) {
+
 		std::ostringstream file_name;
 		if (t_step == 0) {
 
@@ -179,38 +154,9 @@ int main(int argc, char** argv) {
 
 		*system.old_local_solution = *system.current_local_solution;
 
-		const Real initial_linear_solver_tol = 1.e-6;
-		es.parameters.set<Real>("linear solver tolerance") = initial_linear_solver_tol;
-
-		for (unsigned int l = 0; l < n_nonlinear_steps; ++l) {
-			last_nonlinear_soln->zero();
-			last_nonlinear_soln->add(*system.solution);
-
 //			perf_log.push("linear solve");
-			es.get_system("SW").solve();
+		es.get_system("SW").solve();
 //			perf_log.pop("linear solve");
-
-			last_nonlinear_soln->add(-1., *system.solution);
-
-			const Real norm_delta = last_nonlinear_soln->l2_norm();
-
-			const unsigned int n_linear_iterations = system.n_linear_iterations();
-
-			const Real final_linear_residual = system.final_linear_residual();
-			std::cout << "Linear solver converged at step: " << n_linear_iterations
-			    << ", final residual: " << final_linear_residual
-			    << "  Nonlinear convergence: ||u - u_old|| = " << norm_delta << std::endl;
-
-			if ((norm_delta < nonlinear_tolerance)
-			    && (system.final_linear_residual() < nonlinear_tolerance)) {
-				std::cout << " Nonlinear solver converged at step " << l << std::endl;
-				break;
-			}
-
-			es.parameters.set<Real>("linear solver tolerance") = std::min(
-			    Utility::pow<2>(final_linear_residual), initial_linear_solver_tol);
-
-		} // end nonlinear loop
 
 		const unsigned int write_interval = 20;
 		if ((t_step + 1) % write_interval == 0) {
@@ -239,7 +185,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	const unsigned int dim = mesh.mesh_dimension();
 
 	// Get a reference to the Convection-Diffusion system object.
-	TransientLinearImplicitSystem & system = es.get_system<TransientLinearImplicitSystem>("SW");
+	TransientExplicitSystem & system = es.get_system<TransientExplicitSystem>("SW");
 
 	// Numeric ids corresponding to each variable in the system
 	const unsigned int h_var = system.variable_number("h");
@@ -343,6 +289,11 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 	MeshBase::const_element_iterator el = mesh.active_local_elements_begin();
 	const MeshBase::const_element_iterator end_el = mesh.active_local_elements_end();
 
+	int elem_num=0;
+
+	system.solution->print();
+
+
 	for (; el != end_el; ++el) {
 		// Store a pointer to the element we are currently
 		// working on.  This allows for nicer syntax later.
@@ -357,7 +308,6 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		dof_map.dof_indices(elem, dof_ind_h, h_var);
 		dof_map.dof_indices(elem, dof_ind_p, p_var);
 		dof_map.dof_indices(elem, dof_ind_q, q_var);
-
 
 		const unsigned int n_h_dofs = dof_ind_h.size();
 		const unsigned int n_p_dofs = dof_ind_p.size();
@@ -398,6 +348,9 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 				h_old += phi[l][qp] * system.old_solution(dof_ind_h[l]);
 				p_old += phi[l][qp] * system.old_solution(dof_ind_p[l]);
 				q_old += phi[l][qp] * system.old_solution(dof_ind_q[l]);
+//				std::cout<< "h elemetn "<<elem_num<<" and node "<<l<<" is "<<system.solution->el(dof_ind_h[l])<<std::endl;
+//				std::cout<< "p elemetn "<<elem_num<<" and node "<<l<<" is "<<system.solution->el(dof_ind_p[l])<<std::endl;
+//				std::cout<< "q elemetn "<<elem_num<<" and node "<<l<<" is "<<system.solution->el(dof_ind_q[l])<<std::endl;
 			}
 
 			// First, an i-loop over the velocity degrees of freedom.
@@ -429,6 +382,10 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		}
 
 		h_ave /= elem->volume();
+
+		AutoPtr<NumericVector<Number> > ABC = system.solution;
+//		std::cout<< "this the size of vector  "<<ABC->size()<<std::endl;
+//		ABC->print_info();
 
 		for (unsigned int qp = 0; qp < qrule.n_points(); qp++) {
 
@@ -541,7 +498,7 @@ void assemble_sw(EquationSystems& es, const std::string& system_name) {
 		Mqe.lu_solve(Fqe, solqe);
 
 	} // end of element loop
-
+elem_num++;
 	// That's it.
 	return;
 }
@@ -617,7 +574,7 @@ void init_cd(EquationSystems& es, const std::string& system_name) {
 	libmesh_assert_equal_to(system_name, "SW");
 
 	// Get a reference to the Convection-Diffusion system object.
-	TransientLinearImplicitSystem & system = es.get_system<TransientLinearImplicitSystem>("SW");
+	TransientExplicitSystem & system = es.get_system<TransientExplicitSystem>("SW");
 
 	es.parameters.set<Real>("time") = system.time = 0;
 
